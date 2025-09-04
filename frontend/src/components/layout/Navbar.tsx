@@ -11,7 +11,7 @@ import {
   ArrowRightOnRectangleIcon,
   StarIcon
 } from '@heroicons/react/24/outline';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStore } from '../../store/authStore';
 import clsx from 'clsx';
 
 const Navbar: React.FC = () => {

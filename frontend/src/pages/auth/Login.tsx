@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { useAuthStore } from '@/store/authStore';
-import { LoginForm } from '@/types';
+import { useAuthStore } from '../../store/authStore';
+import { LoginForm } from '../../types';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();

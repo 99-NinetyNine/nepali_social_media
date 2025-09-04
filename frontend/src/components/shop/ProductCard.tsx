@@ -2,8 +2,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { StarIcon, ShoppingCartIcon } from '@heroicons/react/24/outline';
 import { StarIcon as StarIconSolid } from '@heroicons/react/24/solid';
-import { Product } from '@/types';
-import Button from '@/components/common/Button';
+import { Product } from '../../types';
+import Button from '../common/Button';
 
 interface ProductCardProps {
   product: Product;

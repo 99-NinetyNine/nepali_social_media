@@ -1,4 +1,5 @@
 import React from 'react';
+import PostCard from '../components/posts/PostCard';
 
 const Home: React.FC = () => {
   return (
