@@ -28,7 +28,7 @@ const Shop: React.FC = () => {
         shopApi.getCategories()
       ]);
       setProducts(productsRes.data.results || productsRes.data);
-      setCategories(categoriesRes.data);
+      setCategories(categoriesRes.data.results);
       setIsLoading(false);
     } catch (error) {
       console.error('Error fetching shop data:', error);

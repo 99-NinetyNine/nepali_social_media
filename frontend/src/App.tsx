@@ -1,6 +1,7 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/authStore';
+import { usePortalPreferences } from './hooks/usePortalPreferences';
 import Navbar from './components/layout/Navbar';
 import Home from './pages/Home';
 import Login from './pages/auth/Login';
@@ -17,9 +18,11 @@ import PostDetail from './pages/PostDetail';
 import Jobs from './pages/Jobs';
 import Stories from './pages/Stories';
 import Shorts from './pages/Shorts';
+import Settings from './pages/Settings';
 
 function App() {
   const { user, isLoading } = useAuthStore();
+  const { preferences } = usePortalPreferences();
 
   if (isLoading) {
     return (
@@ -51,15 +54,20 @@ function App() {
               <Route path="/post/:postId" element={<PostDetail />} />
               <Route path="/stories" element={<Stories />} />
               <Route path="/shorts" element={<Shorts />} />
-              <Route path="/jobs" element={<Jobs />} />
+              {preferences.enable_job_portal && <Route path="/jobs" element={<Jobs />} />}
               <Route path="/premium" element={<Premium />} />
+              <Route path="/settings" element={<Settings />} />
               
-              {/* Shop routes */}
-              <Route path="/shop" element={<Shop />} />
-              <Route path="/shop/product/:productId" element={<ProductDetail />} />
-              <Route path="/cart" element={<Cart />} />
-              <Route path="/checkout" element={<Checkout />} />
-              <Route path="/orders" element={<Orders />} />
+              {/* Shop routes - conditional */}
+              {preferences.enable_shop_portal && (
+                <>
+                  <Route path="/shop" element={<Shop />} />
+                  <Route path="/shop/product/:productId" element={<ProductDetail />} />
+                  <Route path="/cart" element={<Cart />} />
+                  <Route path="/checkout" element={<Checkout />} />
+                  <Route path="/orders" element={<Orders />} />
+                </>
+              )}
               
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route path="/register" element={<Navigate to="/" replace />} />

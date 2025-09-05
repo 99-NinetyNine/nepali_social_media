@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.utils.text import slugify
 import uuid
 
 User = get_user_model()
@@ -91,6 +92,17 @@ class Product(models.Model):
         if self.original_price and self.original_price > self.price:
             return int(((self.original_price - self.price) / self.original_price) * 100)
         return 0
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.name)
+            slug = base_slug
+            counter = 1
+            while Product.objects.filter(slug=slug).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
 
 
 class ProductImage(models.Model):

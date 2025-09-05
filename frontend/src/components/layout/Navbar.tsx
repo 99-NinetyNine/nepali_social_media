@@ -12,20 +12,27 @@ import {
   StarIcon
 } from '@heroicons/react/24/outline';
 import { useAuthStore } from '../../store/authStore';
+import { usePortalPreferences } from '../../hooks/usePortalPreferences';
 import clsx from 'clsx';
 
 const Navbar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
+  const { preferences } = usePortalPreferences();
 
-  const navigation = [
+  const baseNavigation = [
     { name: 'Home', href: '/', icon: HomeIcon },
     { name: 'Stories', href: '/stories', icon: PlusIcon },
     { name: 'Shorts', href: '/shorts', icon: PlusIcon },
-    { name: 'Jobs', href: '/jobs', icon: BriefcaseIcon },
-    { name: 'Shop', href: '/shop', icon: ShoppingBagIcon },
   ];
+
+  const conditionalNavigation = [
+    ...(preferences.enable_job_portal ? [{ name: 'Jobs', href: '/jobs', icon: BriefcaseIcon }] : []),
+    ...(preferences.enable_shop_portal ? [{ name: 'Shop', href: '/shop', icon: ShoppingBagIcon }] : []),
+  ];
+
+  const navigation = [...baseNavigation, ...conditionalNavigation];
 
   const handleLogout = () => {
     logout();
@@ -127,17 +134,34 @@ const Navbar: React.FC = () => {
                       )}
                     </Menu.Item>
                     
+                    {preferences.enable_shop_portal && (
+                      <Menu.Item>
+                        {({ active }) => (
+                          <Link
+                            to="/orders"
+                            className={clsx(
+                              'flex items-center px-4 py-2 text-sm',
+                              active ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
+                            )}
+                          >
+                            <ShoppingBagIcon className="h-4 w-4 mr-3" />
+                            Orders
+                          </Link>
+                        )}
+                      </Menu.Item>
+                    )}
+
                     <Menu.Item>
                       {({ active }) => (
                         <Link
-                          to="/orders"
+                          to="/settings"
                           className={clsx(
                             'flex items-center px-4 py-2 text-sm',
                             active ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
                           )}
                         >
-                          <ShoppingBagIcon className="h-4 w-4 mr-3" />
-                          Orders
+                          <CogIcon className="h-4 w-4 mr-3" />
+                          Settings
                         </Link>
                       )}
                     </Menu.Item>

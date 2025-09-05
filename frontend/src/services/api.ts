@@ -132,7 +132,7 @@ export const shopApi = {
     api.get('/ecommerce/cart/'),
   
   addToCart: (productId: number, quantity: number, variantId?: number) =>
-    api.post('/ecommerce/cart/add/', { 
+    api.post('/ecommerce/cart/add_item/', { 
       product_id: productId, 
       quantity, 
       variant_id: variantId 

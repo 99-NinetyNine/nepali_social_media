@@ -58,6 +58,26 @@ class UserProfile(models.Model):
     following_count = models.PositiveIntegerField(default=0)
     posts_count = models.PositiveIntegerField(default=0)
     
+    # Job matching fields
+    skills = models.JSONField(default=list, blank=True, help_text="List of technical skills")
+    experience_years = models.PositiveIntegerField(null=True, blank=True, help_text="Total years of experience")
+    experience_start_date = models.DateField(null=True, blank=True, help_text="When user started their career")
+    preferred_salary_min = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    preferred_salary_max = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    preferred_locations = models.JSONField(default=list, blank=True, help_text="Preferred work locations")
+    remote_work_preference = models.CharField(
+        max_length=20,
+        choices=[
+            ('on_site', 'On-site Only'),
+            ('remote', 'Remote Only'),  
+            ('hybrid', 'Hybrid'),
+            ('flexible', 'Flexible')
+        ],
+        null=True, blank=True
+    )
+    cover_letter_template = models.TextField(blank=True, help_text="Default cover letter template")
+    job_preferences = models.JSONField(default=dict, blank=True, help_text="Job type, experience level preferences")
+    
     # Monetization settings
     is_creator = models.BooleanField(default=False)
     monthly_subscription_fee = models.DecimalField(max_digits=8, decimal_places=2, default=0.00)
@@ -69,6 +89,21 @@ class UserProfile(models.Model):
     
     # Credits/wallet for internal transactions
     credit_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+
+    def get_current_experience_years(self):
+        """Calculate current experience years based on start date"""
+        if self.experience_start_date:
+            from datetime import date
+            today = date.today()
+            years = (today - self.experience_start_date).days / 365.25
+            return max(0, round(years, 1))
+        return self.experience_years or 0
+
+    def update_experience_years(self):
+        """Auto-update experience years if start date is available"""
+        if self.experience_start_date:
+            self.experience_years = int(self.get_current_experience_years())
+            self.save(update_fields=['experience_years'])
 
     def __str__(self):
         return f"{self.user.username}'s Profile"
@@ -167,6 +202,7 @@ class JobApplication(models.Model):
     STATUS_CHOICES = [
         ('applied', 'Applied'),
         ('reviewed', 'Reviewed'),
+        ('maybe', 'Maybe'),
         ('interview', 'Interview'),
         ('rejected', 'Rejected'),
         ('accepted', 'Accepted'),
@@ -177,6 +213,26 @@ class JobApplication(models.Model):
     cover_letter = models.TextField()
     resume = models.FileField(upload_to='resumes/')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='applied')
+    
+    # Smart application data (auto-filled from profile)
+    experience_years_at_apply = models.PositiveIntegerField(null=True, blank=True)
+    skills_at_apply = models.JSONField(default=list, blank=True)
+    salary_expectation = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    location_preference = models.CharField(max_length=200, blank=True)
+    remote_preference = models.CharField(max_length=20, blank=True)
+    
+    # Job matching score (calculated via AI)
+    match_score = models.FloatField(null=True, blank=True, help_text="AI-calculated job match percentage")
+    skills_match_score = models.FloatField(null=True, blank=True)
+    experience_match_score = models.FloatField(null=True, blank=True)
+    location_match_score = models.FloatField(null=True, blank=True)
+    salary_match_score = models.FloatField(null=True, blank=True)
+    
+    # Tinder-style review tracking
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_applications')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_notes = models.TextField(blank=True, help_text="Recruiter's private notes")
+    
     applied_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

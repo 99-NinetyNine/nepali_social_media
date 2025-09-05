@@ -95,7 +95,8 @@ const Profile: React.FC = () => {
       setLoading(true);
       const response = await fetch(`/api/auth/profile/${username}/`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Cache-Control': 'no-cache'
         }
       });
       
