@@ -1,4 +1,4 @@
-import React, { Fragment } from 'react';
+import React, { Fragment, useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, Transition } from '@headlessui/react';
 import { 
@@ -9,10 +9,13 @@ import {
   UserIcon,
   CogIcon,
   ArrowRightOnRectangleIcon,
-  StarIcon
+  StarIcon,
+  CreditCardIcon,
+  BuildingStorefrontIcon
 } from '@heroicons/react/24/outline';
 import { useAuthStore } from '../../store/authStore';
 import { usePortalPreferences } from '../../hooks/usePortalPreferences';
+import { useCredits } from '../../hooks/useCredits';
 import clsx from 'clsx';
 
 const Navbar: React.FC = () => {
@@ -20,6 +23,7 @@ const Navbar: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
   const { preferences } = usePortalPreferences();
+  const { balance } = useCredits();
 
   const baseNavigation = [
     { name: 'Home', href: '/', icon: HomeIcon },
@@ -81,6 +85,17 @@ const Navbar: React.FC = () => {
               <span className="hidden sm:block">Create</span>
             </Link>
 
+            {/* Credit Balance */}
+            <Link 
+              to="/credits/add"
+              className="flex items-center space-x-2 px-3 py-2 bg-primary-50 hover:bg-primary-100 text-primary-700 rounded-lg text-sm font-medium transition-colors"
+              title="Add Credits"
+            >
+              <CreditCardIcon className="h-4 w-4" />
+              <span className="hidden sm:block">{balance.toLocaleString()}</span>
+              <span className="sm:hidden">{balance > 999 ? '999+' : balance}</span>
+            </Link>
+
             {/* Premium Badge */}
             {user?.is_premium && (
               <div className="flex items-center space-x-1 px-2 py-1 bg-gradient-to-r from-yellow-400 to-yellow-600 text-white rounded-full text-xs font-medium">
@@ -135,20 +150,36 @@ const Navbar: React.FC = () => {
                     </Menu.Item>
                     
                     {preferences.enable_shop_portal && (
-                      <Menu.Item>
-                        {({ active }) => (
-                          <Link
-                            to="/orders"
-                            className={clsx(
-                              'flex items-center px-4 py-2 text-sm',
-                              active ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
-                            )}
-                          >
-                            <ShoppingBagIcon className="h-4 w-4 mr-3" />
-                            Orders
-                          </Link>
-                        )}
-                      </Menu.Item>
+                      <>
+                        <Menu.Item>
+                          {({ active }) => (
+                            <Link
+                              to="/shops"
+                              className={clsx(
+                                'flex items-center px-4 py-2 text-sm',
+                                active ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
+                              )}
+                            >
+                              <BuildingStorefrontIcon className="h-4 w-4 mr-3" />
+                              My Shops
+                            </Link>
+                          )}
+                        </Menu.Item>
+                        <Menu.Item>
+                          {({ active }) => (
+                            <Link
+                              to="/orders"
+                              className={clsx(
+                                'flex items-center px-4 py-2 text-sm',
+                                active ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
+                              )}
+                            >
+                              <ShoppingBagIcon className="h-4 w-4 mr-3" />
+                              Orders
+                            </Link>
+                          )}
+                        </Menu.Item>
+                      </>
                     )}
 
                     <Menu.Item>

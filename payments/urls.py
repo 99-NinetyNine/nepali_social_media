@@ -1,8 +1,8 @@
 from django.urls import path
 from .views import (
     PremiumPlanListView, InvoiceListCreateView, InvoiceDetailView,
-    subscribe_premium, confirm_payment, verify_khalti_payment, WalletView, add_funds_to_wallet,
-    CreatorEarningListView, withdraw_earnings
+    subscribe_premium, confirm_payment, verify_khalti_payment, WalletView, 
+    WalletTransactionListView, add_funds_to_wallet, CreatorEarningListView, withdraw_earnings
 )
 
 urlpatterns = [
@@ -14,6 +14,7 @@ urlpatterns = [
     path('verify-khalti/', verify_khalti_payment, name='verify-khalti-payment'),
     path('wallet/', WalletView.as_view(), name='wallet'),
     path('wallet/add-funds/', add_funds_to_wallet, name='add-funds'),
+    path('wallet/transactions/', WalletTransactionListView.as_view(), name='wallet-transactions'),
     path('earnings/', CreatorEarningListView.as_view(), name='creator-earnings'),
     path('withdraw/', withdraw_earnings, name='withdraw-earnings'),
 ]

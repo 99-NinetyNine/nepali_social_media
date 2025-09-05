@@ -6,12 +6,16 @@ import Navbar from './components/layout/Navbar';
 import Home from './pages/Home';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
+import GoogleCallback from './pages/auth/GoogleCallback';
 import Profile from './pages/Profile';
 import Shop from './pages/shop/Shop';
 import ProductDetail from './pages/shop/ProductDetail';
 import Cart from './pages/shop/Cart';
 import Checkout from './pages/shop/Checkout';
 import Orders from './pages/shop/Orders';
+import Shops from './pages/shop/Shops';
+import ShopForm from './pages/shop/ShopForm';
+import ShopDetail from './pages/shop/ShopDetail';
 import Premium from './pages/Premium';
 import CreatePost from './pages/CreatePost';
 import PostDetail from './pages/PostDetail';
@@ -19,6 +23,10 @@ import Jobs from './pages/Jobs';
 import Stories from './pages/Stories';
 import Shorts from './pages/Shorts';
 import Settings from './pages/Settings';
+import AddCredits from './pages/payment/AddCredits';
+import PaymentSuccess from './pages/payment/PaymentSuccess';
+import PaymentFailed from './pages/payment/PaymentFailed';
+import CreditHistory from './pages/payment/CreditHistory';
 
 function App() {
   const { user, isLoading } = useAuthStore();
@@ -43,6 +51,7 @@ function App() {
             <>
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/auth/google/callback" element={<GoogleCallback />} />
               <Route path="*" element={<Navigate to="/login" replace />} />
             </>
           ) : (
@@ -58,6 +67,12 @@ function App() {
               <Route path="/premium" element={<Premium />} />
               <Route path="/settings" element={<Settings />} />
               
+              {/* Payment routes */}
+              <Route path="/credits/add" element={<AddCredits />} />
+              <Route path="/credits/history" element={<CreditHistory />} />
+              <Route path="/payment/success" element={<PaymentSuccess />} />
+              <Route path="/payment/failed" element={<PaymentFailed />} />
+              
               {/* Shop routes - conditional */}
               {preferences.enable_shop_portal && (
                 <>
@@ -66,11 +81,18 @@ function App() {
                   <Route path="/cart" element={<Cart />} />
                   <Route path="/checkout" element={<Checkout />} />
                   <Route path="/orders" element={<Orders />} />
+                  
+                  {/* Shop Management Routes */}
+                  <Route path="/shops" element={<Shops />} />
+                  <Route path="/shop/create" element={<ShopForm />} />
+                  <Route path="/shop/:id" element={<ShopDetail />} />
+                  <Route path="/shop/:id/edit" element={<ShopForm />} />
                 </>
               )}
               
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route path="/register" element={<Navigate to="/" replace />} />
+              <Route path="/auth/google/callback" element={<GoogleCallback />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>
           )}

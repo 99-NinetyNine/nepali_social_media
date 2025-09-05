@@ -7,6 +7,69 @@ import uuid
 User = get_user_model()
 
 
+class Shop(models.Model):
+    SHOP_STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('suspended', 'Suspended'),
+        ('pending_review', 'Pending Review'),
+    ]
+    
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shops')
+    name = models.CharField(max_length=200)
+    description = models.TextField()
+    logo = models.ImageField(upload_to='shop_logos/', null=True, blank=True)
+    
+    # Shop settings
+    is_active = models.BooleanField(default=True)
+    status = models.CharField(max_length=20, choices=SHOP_STATUS_CHOICES, default='active')
+    
+    # Contact information
+    contact_email = models.EmailField(blank=True)
+    contact_phone = models.CharField(max_length=20, blank=True)
+    address = models.TextField(blank=True)
+    
+    # Business information
+    business_license = models.CharField(max_length=100, blank=True)
+    tax_id = models.CharField(max_length=50, blank=True)
+    
+    # Shop limits
+    max_products = models.PositiveIntegerField(default=100)
+    
+    # SEO
+    slug = models.SlugField(unique=True, blank=True)
+    
+    # Statistics
+    total_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    total_orders = models.PositiveIntegerField(default=0)
+    average_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.name
+
+    def get_product_count(self):
+        return self.products.filter(is_active=True).count()
+
+    def can_add_product(self):
+        return self.get_product_count() < self.max_products
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.name)
+            slug = base_slug
+            counter = 1
+            while Shop.objects.filter(slug=slug).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
+
+
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
@@ -39,6 +102,7 @@ class Product(models.Model):
     ]
 
     seller = models.ForeignKey(User, on_delete=models.CASCADE, related_name='products')
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='products')
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='products')
     
     name = models.CharField(max_length=200)

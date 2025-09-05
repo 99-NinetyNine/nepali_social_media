@@ -14,6 +14,15 @@ class User(AbstractUser):
     suspended_until = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # Google OAuth fields
+    google_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    full_name = models.CharField(max_length=255, blank=True)
+    profile_picture_url = models.URLField(blank=True)
+    auth_provider = models.CharField(max_length=20, default='local', choices=[
+        ('local', 'Local'),
+        ('google', 'Google'),
+    ])
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
@@ -136,6 +145,13 @@ class Connection(models.Model):
 
 
 class Company(models.Model):
+    VERIFICATION_STATUS_CHOICES = [
+        ('unverified', 'Unverified'),
+        ('pending', 'Pending Verification'),
+        ('verified', 'Verified'),
+        ('rejected', 'Verification Rejected'),
+    ]
+    
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='companies')
     name = models.CharField(max_length=200)
     description = models.TextField()
@@ -154,7 +170,28 @@ class Company(models.Model):
         ]
     )
     is_verified = models.BooleanField(default=False)
+    verification_status = models.CharField(
+        max_length=20,
+        choices=VERIFICATION_STATUS_CHOICES,
+        default='unverified'
+    )
+    verification_notes = models.TextField(blank=True, help_text="Admin notes for verification")
+    
+    # Additional company details
+    founded_year = models.PositiveIntegerField(null=True, blank=True)
+    contact_email = models.EmailField(blank=True)
+    contact_phone = models.CharField(max_length=20, blank=True)
+    linkedin_url = models.URLField(blank=True)
+    twitter_url = models.URLField(blank=True)
+    
+    # Company settings
+    is_hiring = models.BooleanField(default=True)
+    allows_remote_work = models.BooleanField(default=False)
+    company_culture = models.TextField(blank=True, help_text="Describe company culture and values")
+    benefits = models.JSONField(default=list, blank=True, help_text="List of company benefits")
+    
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name_plural = "Companies"

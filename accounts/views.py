@@ -11,7 +11,8 @@ from .models import User, UserProfile, Connection, Company, Job, JobApplication,
 from .serializers import (
     UserRegistrationSerializer, UserSerializer, UserProfileSerializer,
     ConnectionSerializer, CompanySerializer, JobSerializer, JobApplicationSerializer,
-    SubscriptionSerializer, SubscriptionCreateSerializer, CreditTransactionSerializer
+    SubscriptionSerializer, SubscriptionCreateSerializer, CreditTransactionSerializer,
+    GoogleAuthSerializer, GoogleAuthUrlSerializer, CompleteProfileSerializer
 )
 
 
@@ -133,29 +134,120 @@ class CompanyListCreateView(generics.ListCreateAPIView):
             user.save()
         
         # Check organization count for payment
+        from payments.models import Wallet
+        
         existing_orgs = Company.objects.filter(owner=user).count()
         organization_fee = 50  # Fee per additional organization after the first one
         
         if existing_orgs >= 1:
+            # Get or create user's wallet
+            wallet, created = Wallet.objects.get_or_create(user=user)
+            
             # Check if user has enough credits for additional organization
-            if user.credits < organization_fee:
+            if wallet.balance < organization_fee:
                 raise ValidationError({
-                    'error': f'Insufficient credits. Creating additional organizations requires {organization_fee} credits. Current balance: {user.credits}'
+                    'error': f'Insufficient credits. Creating additional organizations requires {organization_fee} credits. Current balance: {wallet.balance}'
                 })
             
-            # Deduct credits
-            user.credits -= organization_fee
-            user.save()
-            
-            # Create credit transaction record
-            CreditTransaction.objects.create(
-                user=user,
-                amount=-organization_fee,
-                transaction_type='organization_fee',
-                description=f'Organization creation fee for "{self.request.data.get("name", "New Organization")}"'
+            # Deduct credits from wallet
+            wallet.deduct_funds(
+                organization_fee,
+                f'Organization creation fee for "{self.request.data.get("name", "New Organization")}"'
             )
         
         serializer.save(owner=user)
+
+
+class CompanyDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = CompanySerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Company.objects.filter(owner=self.request.user)
+
+    def perform_destroy(self, instance):
+        # Only allow deletion if it's not the user's only company and they have active jobs
+        user_companies = Company.objects.filter(owner=self.request.user)
+        
+        if user_companies.count() == 1:
+            # Check if there are active jobs for this company
+            active_jobs = Job.objects.filter(company=instance, is_active=True).count()
+            if active_jobs > 0:
+                raise ValidationError({
+                    'error': f'Cannot delete company with {active_jobs} active job postings. Please deactivate jobs first.'
+                })
+        
+        instance.delete()
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def company_stats(request, company_id):
+    """Get statistics for a specific company"""
+    try:
+        company = Company.objects.get(id=company_id, owner=request.user)
+    except Company.DoesNotExist:
+        return Response({
+            'error': 'Company not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    # Calculate various statistics
+    total_jobs = Job.objects.filter(company=company).count()
+    active_jobs = Job.objects.filter(company=company, is_active=True).count()
+    total_applications = JobApplication.objects.filter(job__company=company).count()
+    pending_applications = JobApplication.objects.filter(
+        job__company=company, 
+        status='applied'
+    ).count()
+    
+    # Recent activity (last 30 days)
+    from django.utils import timezone
+    from datetime import timedelta
+    
+    thirty_days_ago = timezone.now() - timedelta(days=30)
+    recent_applications = JobApplication.objects.filter(
+        job__company=company,
+        applied_at__gte=thirty_days_ago
+    ).count()
+    
+    recent_jobs = Job.objects.filter(
+        company=company,
+        created_at__gte=thirty_days_ago
+    ).count()
+
+    return Response({
+        'company': CompanySerializer(company).data,
+        'stats': {
+            'total_jobs': total_jobs,
+            'active_jobs': active_jobs,
+            'total_applications': total_applications,
+            'pending_applications': pending_applications,
+            'recent_applications': recent_applications,
+            'recent_jobs': recent_jobs,
+        }
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def verify_company(request, company_id):
+    """Submit company for verification (admin only endpoint in practice)"""
+    try:
+        company = Company.objects.get(id=company_id, owner=request.user)
+    except Company.DoesNotExist:
+        return Response({
+            'error': 'Company not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    # In a real implementation, this would create a verification request
+    # For now, we'll just mark as pending verification
+    company.verification_status = 'pending'
+    company.save()
+
+    return Response({
+        'message': 'Company submitted for verification',
+        'company': CompanySerializer(company).data
+    })
 
 
 class JobViewSet(viewsets.ModelViewSet):
@@ -850,3 +942,36 @@ def get_portal_preferences(request):
         'enable_shop_portal': profile.enable_shop_portal,
         'is_business': request.user.is_business
     })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def google_auth_url(request):
+    """Get Google OAuth authorization URL"""
+    print("hi there..")
+    serializer = GoogleAuthUrlSerializer()
+    return Response(serializer.to_representation(None))
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def google_auth_callback(request):
+    """Handle Google OAuth callback"""
+    serializer = GoogleAuthSerializer(data=request.data)
+    if serializer.is_valid():
+        return Response(serializer.validated_data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def complete_profile(request):
+    """Complete profile after Google OAuth signup"""
+    serializer = CompleteProfileSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.update(request.user, serializer.validated_data)
+        return Response({
+            'message': 'Profile completed successfully',
+            'user': UserSerializer(user).data
+        })
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

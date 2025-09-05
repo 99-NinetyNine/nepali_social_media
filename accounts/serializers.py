@@ -1,6 +1,8 @@
 from rest_framework import serializers
+from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from .models import User, UserProfile, Connection, Company, Job, JobApplication, Subscription, SubscriptionTransaction, CreditTransaction
+from .google_auth import GoogleOAuth
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -35,9 +37,10 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name', 
-                 'is_premium', 'is_business', 'profile', 'date_joined')
-        read_only_fields = ('is_premium', 'account_balance')
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'full_name',
+                 'profile_picture_url', 'is_premium', 'is_business', 'profile', 
+                 'date_joined', 'auth_provider')
+        read_only_fields = ('is_premium', 'account_balance', 'auth_provider')
 
 
 class ConnectionSerializer(serializers.ModelSerializer):
@@ -164,3 +167,64 @@ class CreditTransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = CreditTransaction
         fields = '__all__'
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    code = serializers.CharField()
+    
+    def validate(self, attrs):
+        code = attrs.get('code')
+        
+        google_auth = GoogleOAuth()
+        try:
+            user_info = google_auth.exchange_code_for_token(code)
+            user, created = google_auth.create_or_get_user(user_info)
+            
+            if created:
+                # Create profile for new user
+                UserProfile.objects.create(user=user)
+            
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            
+            return {
+                'user': UserSerializer(user).data,
+                'access_token': str(refresh.access_token),
+                'refresh_token': str(refresh),
+                'created': created
+            }
+        except Exception as e:
+            raise serializers.ValidationError(f'Google authentication failed: {str(e)}')
+
+
+class GoogleAuthUrlSerializer(serializers.Serializer):
+    def to_representation(self, instance):
+        google_auth = GoogleOAuth()
+        return {
+            'auth_url': google_auth.get_auth_url()
+        }
+
+
+class CompleteProfileSerializer(serializers.Serializer):
+    full_name = serializers.CharField(max_length=255, required=False)
+    bio = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    location = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    
+    def update(self, instance, validated_data):
+        profile = instance.profile
+        
+        if 'full_name' in validated_data:
+            instance.full_name = validated_data['full_name']
+            # Split full name into first/last name
+            name_parts = validated_data['full_name'].split(' ', 1)
+            instance.first_name = name_parts[0]
+            instance.last_name = name_parts[1] if len(name_parts) > 1 else ''
+            instance.save()
+        
+        for field in ['bio', 'location', 'phone_number']:
+            if field in validated_data:
+                setattr(profile, field, validated_data[field])
+        
+        profile.save()
+        return instance

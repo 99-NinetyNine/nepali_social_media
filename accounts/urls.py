@@ -3,12 +3,14 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     RegisterView, login_view, ProfileView, UserListView,
     ConnectUserView, ConnectionListView, CompanyListCreateView,
+    CompanyDetailView, company_stats, verify_company,
     JobViewSet, JobApplicationView, PublicProfileView,
     UserPostsView, follow_user, approve_follow_request, 
     follow_requests, followers_list, following_list,
     SubscriptionViewSet, subscribe_to_creator, add_credits,
     credit_transactions, subscription_status, update_portal_preferences,
-    get_portal_preferences
+    get_portal_preferences, google_auth_url, google_auth_callback,
+    complete_profile
 )
 
 router = DefaultRouter()
@@ -23,6 +25,9 @@ urlpatterns = [
     path('connect/', ConnectUserView.as_view(), name='connect-user'),
     path('connections/', ConnectionListView.as_view(), name='connections'),
     path('companies/', CompanyListCreateView.as_view(), name='companies'),
+    path('companies/<int:pk>/', CompanyDetailView.as_view(), name='company-detail'),
+    path('companies/<int:company_id>/stats/', company_stats, name='company-stats'),
+    path('companies/<int:company_id>/verify/', verify_company, name='company-verify'),
     path('jobs/apply/', JobApplicationView.as_view(), name='job-apply'),
     
     # Profile and follow system
@@ -44,4 +49,9 @@ urlpatterns = [
     # Portal preferences
     path('portal-preferences/', get_portal_preferences, name='get-portal-preferences'),
     path('portal-preferences/update/', update_portal_preferences, name='update-portal-preferences'),
+    
+    # Google OAuth
+    path('google/auth-url/', google_auth_url, name='google-auth-url'),
+    path('google/callback/', google_auth_callback, name='google-auth-callback'),
+    path('complete-profile/', complete_profile, name='complete-profile'),
 ]

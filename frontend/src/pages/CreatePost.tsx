@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { postsApi } from '../services/api';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 
 const CreatePost: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     post_type: 'post',
@@ -14,6 +15,13 @@ const CreatePost: React.FC = () => {
     allow_comments: true,
   });
   const [files, setFiles] = useState<FileList | null>(null);
+
+  useEffect(() => {
+    const type = searchParams.get('type');
+    if (type && ['post', 'short', 'story', 'ad'].includes(type)) {
+      setFormData(prev => ({ ...prev, post_type: type }));
+    }
+  }, [searchParams]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;

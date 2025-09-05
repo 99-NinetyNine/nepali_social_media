@@ -341,10 +341,20 @@ class WalletView(generics.RetrieveAPIView):
         return wallet
 
 
+class WalletTransactionListView(generics.ListAPIView):
+    serializer_class = WalletTransactionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        wallet, created = Wallet.objects.get_or_create(user=self.request.user)
+        return wallet.transactions.all()[:50]  # Limit to recent 50 transactions
+
+
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def add_funds_to_wallet(request):
     amount = float(request.data.get('amount', 0))
+    payment_method = request.data.get('payment_method', 'khalti')
     
     if amount <= 0:
         return Response({
@@ -357,34 +367,95 @@ def add_funds_to_wallet(request):
         invoice_type='wallet_funding',
         subtotal=amount,
         total_amount=amount,
-        payment_method='stripe'
+        payment_method=payment_method
     )
     
-    try:
-        # Create Stripe payment intent
-        intent = stripe.PaymentIntent.create(
-            amount=int(amount * 100),
-            currency='usd',
-            metadata={
-                'invoice_id': str(invoice.invoice_id),
-                'user_id': str(request.user.id),
-                'purpose': 'wallet_funding'
+    # Add invoice item for credits
+    credit_amount = amount  # 1 NPR = 1 credit for simplicity
+    invoice.items.create(
+        description=f"{credit_amount} Credits Purchase",
+        quantity=1,
+        unit_price=amount,
+        total_price=amount,
+        metadata={'credit_amount': str(credit_amount)}
+    )
+    
+    if payment_method == 'khalti':
+        try:
+            khalti_payload = {
+                "return_url": "http://localhost:3000/payment/success/",
+                "website_url": "http://localhost:3000/",
+                "amount": int(amount * 100),  # Convert to paisa (NPR * 100)
+                "purchase_order_id": str(invoice.invoice_id),
+                "purchase_order_name": f"Add {credit_amount} Credits",
+                "customer_info": {
+                    "name": f"{request.user.first_name} {request.user.last_name}" or request.user.username,
+                    "email": request.user.email,
+                }
             }
-        )
-        
-        invoice.stripe_payment_intent_id = intent.id
-        invoice.status = 'pending'
-        invoice.save()
-        
-        return Response({
-            'client_secret': intent.client_secret,
-            'invoice_id': invoice.invoice_id
-        })
-        
-    except stripe.error.StripeError as e:
-        return Response({
-            'error': f'Stripe error: {str(e)}'
-        }, status=status.HTTP_400_BAD_REQUEST)
+            
+            headers = {
+                'Authorization': f'Key {settings.KHALTI_SECRET_KEY}',
+                'Content-Type': 'application/json',
+            }
+            
+            khalti_response = requests.post(
+                'https://a.khalti.com/api/v2/epayment/initiate/',
+                json=khalti_payload,
+                headers=headers
+            )
+            
+            if khalti_response.status_code == 200:
+                khalti_data = khalti_response.json()
+                invoice.payment_reference = khalti_data.get('pidx')
+                invoice.status = 'pending'
+                invoice.save()
+                
+                return Response({
+                    'payment_url': khalti_data.get('payment_url'),
+                    'invoice_id': invoice.invoice_id,
+                    'pidx': khalti_data.get('pidx')
+                })
+            else:
+                return Response({
+                    'error': 'Khalti payment initiation failed'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            return Response({
+                'error': f'Khalti error: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif payment_method == 'stripe':
+        try:
+            # Create Stripe payment intent
+            intent = stripe.PaymentIntent.create(
+                amount=int(amount * 100),
+                currency='usd',
+                metadata={
+                    'invoice_id': str(invoice.invoice_id),
+                    'user_id': str(request.user.id),
+                    'purpose': 'wallet_funding'
+                }
+            )
+            
+            invoice.stripe_payment_intent_id = intent.id
+            invoice.status = 'pending'
+            invoice.save()
+            
+            return Response({
+                'client_secret': intent.client_secret,
+                'invoice_id': invoice.invoice_id
+            })
+            
+        except stripe.error.StripeError as e:
+            return Response({
+                'error': f'Stripe error: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    return Response({
+        'error': 'Unsupported payment method'
+    }, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CreatorEarningListView(generics.ListAPIView):

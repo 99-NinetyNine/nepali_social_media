@@ -85,6 +85,7 @@ export interface Comment {
 export interface Product {
   id: number;
   seller: User;
+  shop?: Shop;
   category: Category;
   name: string;
   description: string;
@@ -92,14 +93,40 @@ export interface Product {
   price: number;
   original_price: number | null;
   stock_quantity: number;
+  low_stock_threshold?: number;
   is_realtime_delivery: boolean;
   preparation_time: number;
   is_active: boolean;
   is_featured: boolean;
   average_rating: number;
   review_count: number;
+  view_count?: number;
   images: ProductImage[];
   created_at: string;
+}
+
+export interface Shop {
+  id: number;
+  owner: User;
+  name: string;
+  description: string;
+  logo?: string;
+  is_active: boolean;
+  status: string;
+  contact_email: string;
+  contact_phone: string;
+  address: string;
+  business_license: string;
+  tax_id: string;
+  max_products: number;
+  slug: string;
+  total_sales: number;
+  total_orders: number;
+  average_rating: number;
+  product_count: number;
+  can_add_product: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Category {

@@ -5,7 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
-
+secret_google.json
 # Distribution / packaging
 .Python
 build/

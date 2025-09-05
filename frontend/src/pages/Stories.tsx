@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { UserIcon, PlusIcon } from '@heroicons/react/24/outline';
 import { Post } from '../types';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 
 const Stories: React.FC = () => {
+  const navigate = useNavigate();
   const [stories, setStories] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +51,10 @@ const Stories: React.FC = () => {
     setSelectedStory(story);
   };
 
+  const handleCreateStory = () => {
+    navigate('/create-post?type=story');
+  };
+
   const closeStory = () => {
     setSelectedStory(null);
   };
@@ -76,7 +82,10 @@ const Stories: React.FC = () => {
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
         {/* Add Your Story */}
-        <div className="card overflow-hidden cursor-pointer hover:shadow-lg transition-shadow border-2 border-dashed border-gray-300">
+        <div 
+          onClick={handleCreateStory}
+          className="card overflow-hidden cursor-pointer hover:shadow-lg transition-shadow border-2 border-dashed border-gray-300"
+        >
           <div className="h-48 bg-gradient-to-br from-gray-100 to-gray-200 relative flex items-center justify-center">
             <div className="text-center">
               <div className="bg-primary-100 rounded-full p-3 mx-auto mb-2">

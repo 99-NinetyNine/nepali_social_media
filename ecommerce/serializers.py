@@ -1,11 +1,37 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
-    Product, Category, ProductImage, ProductVariant, Cart, CartItem,
+    Shop, Product, Category, ProductImage, ProductVariant, Cart, CartItem,
     Order, OrderItem, Review, Wishlist, Coupon
 )
 
 User = get_user_model()
+
+
+class ShopSerializer(serializers.ModelSerializer):
+    owner_name = serializers.CharField(source='owner.username', read_only=True)
+    product_count = serializers.SerializerMethodField()
+    can_add_product = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Shop
+        fields = [
+            'id', 'owner', 'owner_name', 'name', 'description', 'logo',
+            'is_active', 'status', 'contact_email', 'contact_phone', 'address',
+            'business_license', 'tax_id', 'max_products', 'slug',
+            'total_sales', 'total_orders', 'average_rating',
+            'product_count', 'can_add_product', 'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'owner', 'slug', 'total_sales', 'total_orders', 
+            'average_rating', 'created_at', 'updated_at'
+        ]
+
+    def get_product_count(self, obj):
+        return obj.get_product_count()
+
+    def get_can_add_product(self, obj):
+        return obj.can_add_product()
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -33,6 +59,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 
 class ProductSerializer(serializers.ModelSerializer):
     seller_name = serializers.CharField(source='seller.username', read_only=True)
+    shop_name = serializers.CharField(source='shop.name', read_only=True)
     category_name = serializers.CharField(source='category.name', read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
     variants = ProductVariantSerializer(many=True, read_only=True)
@@ -42,7 +69,7 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            'id', 'seller', 'seller_name', 'category', 'category_name',
+            'id', 'seller', 'seller_name', 'shop', 'shop_name', 'category', 'category_name',
             'name', 'description', 'product_type', 'price', 'original_price',
             'discounted_price', 'stock_quantity', 'is_realtime_delivery',
             'preparation_time', 'is_active', 'is_featured', 'average_rating',
@@ -77,10 +104,22 @@ class ProductCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            'category', 'name', 'description', 'product_type', 'price',
+            'shop', 'category', 'name', 'description', 'product_type', 'price',
             'original_price', 'stock_quantity', 'is_realtime_delivery',
             'preparation_time', 'is_featured', 'images'
         ]
+
+    def validate_shop(self, value):
+        user = self.context['request'].user
+        if value.owner != user:
+            raise serializers.ValidationError("You can only add products to your own shops")
+        
+        if not value.can_add_product():
+            raise serializers.ValidationError(
+                f"This shop has reached its product limit of {value.max_products} products"
+            )
+        
+        return value
 
     def create(self, validated_data):
         images_data = validated_data.pop('images', [])

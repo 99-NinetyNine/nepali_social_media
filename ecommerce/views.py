@@ -4,16 +4,115 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, F, Avg
 from django.utils import timezone
+from django.db import transaction
+from rest_framework.exceptions import ValidationError
 from .models import (
-    Product, Category, Cart, CartItem, Order, OrderItem, 
+    Shop, Product, Category, Cart, CartItem, Order, OrderItem, 
     Review, Wishlist, Coupon
 )
 from .serializers import (
-    ProductSerializer, CategorySerializer, CartSerializer, 
+    ShopSerializer, ProductSerializer, CategorySerializer, CartSerializer, 
     CartItemSerializer, OrderSerializer, ProductReviewSerializer,
-    WishlistSerializer
+    WishlistSerializer, ProductCreateSerializer
 )
 from posts.permissions import IsSellerOrReadOnly, IsOwnerOrReadOnly
+from payments.models import Wallet
+
+
+class ShopViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing shops with credit-based payment system.
+    """
+    serializer_class = ShopSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrReadOnly]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'description']
+    ordering_fields = ['created_at', 'total_sales', 'total_orders', 'average_rating']
+    ordering = ['-created_at']
+
+    SHOP_FEE = 75  # Credits required for additional shops (first shop is free)
+
+    def get_queryset(self):
+        return Shop.objects.filter(owner=self.request.user)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        
+        # Check if this is the user's first shop (free)
+        existing_shops_count = Shop.objects.filter(owner=user).count()
+        
+        if existing_shops_count >= 1:
+            # Check if user has sufficient credits for additional shops
+            wallet, created = Wallet.objects.get_or_create(user=user)
+            
+            if wallet.balance < self.SHOP_FEE:
+                raise ValidationError({
+                    'error': f'Insufficient credits. Creating additional shops requires {self.SHOP_FEE} credits. Current balance: {wallet.balance}'
+                })
+            
+            # Deduct credits for additional shop
+            with transaction.atomic():
+                wallet.balance = F('balance') - self.SHOP_FEE
+                wallet.save()
+                wallet.refresh_from_db()
+                
+                # Create transaction record
+                from payments.models import CreditTransaction
+                CreditTransaction.objects.create(
+                    user=user,
+                    amount=-self.SHOP_FEE,
+                    transaction_type='debit',
+                    description=f'Created new shop: {serializer.validated_data["name"]}',
+                    balance_after=wallet.balance
+                )
+        
+        serializer.save(owner=user)
+
+    @action(detail=True, methods=['get'])
+    def products(self, request, pk=None):
+        """Get products in this shop"""
+        shop = self.get_object()
+        products = Product.objects.filter(shop=shop, is_active=True).order_by('-created_at')
+        
+        page = self.paginate_queryset(products)
+        if page is not None:
+            serializer = ProductSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = ProductSerializer(products, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def stats(self, request, pk=None):
+        """Get shop statistics"""
+        shop = self.get_object()
+        
+        stats = {
+            'total_products': shop.get_product_count(),
+            'max_products': shop.max_products,
+            'can_add_product': shop.can_add_product(),
+            'total_sales': float(shop.total_sales),
+            'total_orders': shop.total_orders,
+            'average_rating': float(shop.average_rating),
+            'status': shop.get_status_display()
+        }
+        
+        return Response(stats)
+
+    @action(detail=False, methods=['get'])
+    def pricing_info(self, request):
+        """Get shop pricing information"""
+        user = request.user
+        wallet, created = Wallet.objects.get_or_create(user=user)
+        existing_shops_count = Shop.objects.filter(owner=user).count()
+        
+        return Response({
+            'shop_fee': self.SHOP_FEE,
+            'current_balance': wallet.balance,
+            'existing_shops_count': existing_shops_count,
+            'first_shop_free': existing_shops_count == 0,
+            'can_create_shop': existing_shops_count == 0 or wallet.balance >= self.SHOP_FEE
+        })
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -28,7 +127,12 @@ class ProductViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        queryset = Product.objects.filter(is_active=True).select_related('seller', 'category')
+        queryset = Product.objects.filter(is_active=True).select_related('seller', 'shop', 'category')
+        
+        # Filter by shop
+        shop = self.request.query_params.get('shop')
+        if shop:
+            queryset = queryset.filter(shop_id=shop)
         
         # Filter by category
         category = self.request.query_params.get('category')
@@ -49,6 +153,11 @@ class ProductViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(stock_quantity__gt=0)
         
         return queryset
+
+    def get_serializer_class(self):
+        if self.action in ['create', 'update', 'partial_update']:
+            return ProductCreateSerializer
+        return ProductSerializer
 
     def perform_create(self, serializer):
         serializer.save(seller=self.request.user)
@@ -176,13 +285,24 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def my_products(self, request):
         """Get current user's products (for sellers)"""
-        if not request.user.is_business:
-            return Response(
-                {'error': 'Only business users can sell products'}, 
-                status=status.HTTP_403_FORBIDDEN
-            )
+        # Filter by shop if specified
+        shop_id = request.query_params.get('shop')
         
-        products = Product.objects.filter(seller=request.user).order_by('-created_at')
+        if shop_id:
+            # Get products from specific shop owned by user
+            try:
+                shop = Shop.objects.get(id=shop_id, owner=request.user)
+                products = Product.objects.filter(shop=shop, seller=request.user).order_by('-created_at')
+            except Shop.DoesNotExist:
+                return Response(
+                    {'error': 'Shop not found or not owned by you'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            # Get all products from user's shops
+            user_shops = Shop.objects.filter(owner=request.user)
+            products = Product.objects.filter(shop__in=user_shops, seller=request.user).order_by('-created_at')
+        
         page = self.paginate_queryset(products)
         if page is not None:
             serializer = self.get_serializer(page, many=True)

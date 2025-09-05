@@ -12,9 +12,11 @@ const Shop: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cartItemCount, setCartItemCount] = useState<number>(0);
 
   useEffect(() => {
     fetchInitialData();
+    fetchCartItemCount();
   }, []);
 
   useEffect(() => {
@@ -50,10 +52,22 @@ const Shop: React.FC = () => {
     }
   };
 
+  const fetchCartItemCount = async () => {
+    try {
+      const response = await shopApi.getCart();
+      const cart = response.data;
+      const totalItems = cart.items?.reduce((total: number, item: any) => total + item.quantity, 0) || 0;
+      setCartItemCount(totalItems);
+    } catch (error) {
+      console.log('No cart items or error fetching cart');
+    }
+  };
+
   const handleAddToCart = async (productId: number) => {
     try {
       await shopApi.addToCart(productId, 1);
       alert('Product added to cart!');
+      fetchCartItemCount(); // Refresh cart count
     } catch (error) {
       console.error('Error adding to cart:', error);
       alert('Failed to add product to cart');
@@ -87,8 +101,13 @@ const Shop: React.FC = () => {
     <div className="max-w-6xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold">Shop</h1>
-        <Link to="/cart" className="btn btn-primary">
+        <Link to="/cart" className="btn btn-primary relative">
           🛒 Cart
+          {cartItemCount > 0 && (
+            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center">
+              {cartItemCount > 99 ? '99+' : cartItemCount}
+            </span>
+          )}
         </Link>
       </div>
 

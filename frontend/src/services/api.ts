@@ -91,6 +91,34 @@ export const authApi = {
     api.get(`/auth/profile/${username}/posts/`),
 };
 
+// Accounts API (for organizations and other account-related features)
+export const accountsApi = {
+  getCompanies: () =>
+    api.get('/accounts/companies/'),
+  
+  getCompany: (id: number) =>
+    api.get(`/accounts/companies/${id}/`),
+  
+  createCompany: (data: FormData) =>
+    api.post('/accounts/companies/', data, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  
+  updateCompany: (id: number, data: FormData) =>
+    api.put(`/accounts/companies/${id}/`, data, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  
+  deleteCompany: (id: number) =>
+    api.delete(`/accounts/companies/${id}/`),
+  
+  getCompanyStats: (id: number) =>
+    api.get(`/accounts/companies/${id}/stats/`),
+  
+  verifyCompany: (id: number) =>
+    api.post(`/accounts/companies/${id}/verify/`),
+};
+
 // Posts API
 export const postsApi = {
   getPosts: (params?: any) =>
@@ -156,7 +184,7 @@ export const paymentsApi = {
   getPremiumPlans: () =>
     api.get('/payments/plans/'),
   
-  subscribePremium: (planId: number, paymentMethod: string = 'stripe') =>
+  subscribePremium: (planId: number, paymentMethod: string = 'khalti') =>
     api.post('/payments/subscribe/', { plan_id: planId, payment_method: paymentMethod }),
   
   confirmPayment: (invoiceId: string, paymentIntentId: string) =>
@@ -165,14 +193,23 @@ export const paymentsApi = {
       payment_intent_id: paymentIntentId 
     }),
   
+  verifyKhaltiPayment: (invoiceId: string, pidx: string) =>
+    api.post('/payments/verify-khalti/', { 
+      invoice_id: invoiceId, 
+      pidx: pidx 
+    }),
+  
   getWallet: () =>
     api.get('/payments/wallet/'),
   
-  addFunds: (amount: number) =>
-    api.post('/payments/wallet/add-funds/', { amount }),
+  addFunds: (amount: number, paymentMethod: string = 'khalti') =>
+    api.post('/payments/wallet/add-funds/', { amount, payment_method: paymentMethod }),
   
   getInvoices: () =>
     api.get('/payments/invoices/'),
+  
+  getWalletTransactions: () =>
+    api.get('/payments/wallet/transactions/'),
 };
 
 export default api;
