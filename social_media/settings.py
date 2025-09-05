@@ -137,6 +137,10 @@ CELERY_RESULT_BACKEND = os.getenv('REDIS_URL', 'redis://localhost:6379')
 STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
 
+# Khalti Payment Gateway
+KHALTI_PUBLIC_KEY = os.getenv('KHALTI_PUBLIC_KEY', '')
+KHALTI_SECRET_KEY = os.getenv('KHALTI_SECRET_KEY', '')
+
 DELIVERY_RADIUS_KM = 20
 COMPANY_LOCATION = {
     'lat': 27.7024,

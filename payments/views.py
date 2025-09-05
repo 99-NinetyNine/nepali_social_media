@@ -5,6 +5,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
 import stripe
+import requests
 from .models import (
     PremiumPlan, Invoice, Subscription, Payment, 
     Wallet, WalletTransaction, CreatorEarning
@@ -76,7 +77,8 @@ def subscribe_premium(request):
         description=f"{plan.name} Subscription",
         quantity=1,
         unit_price=plan.price,
-        total_price=plan.price
+        total_price=plan.price,
+        metadata={'plan_id': str(plan.id)}
     )
     
     if payment_method == 'stripe':
@@ -104,6 +106,52 @@ def subscribe_premium(request):
         except stripe.error.StripeError as e:
             return Response({
                 'error': f'Stripe error: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif payment_method == 'khalti':
+        # Create Khalti payment
+        try:
+            khalti_payload = {
+                "return_url": "http://localhost:3000/payment/success/",
+                "website_url": "http://localhost:3000/",
+                "amount": int(plan.price * 100),  # Convert to paisa (NPR * 100)
+                "purchase_order_id": str(invoice.invoice_id),
+                "purchase_order_name": f"{plan.name} Subscription",
+                "customer_info": {
+                    "name": f"{request.user.first_name} {request.user.last_name}",
+                    "email": request.user.email,
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Key {settings.KHALTI_SECRET_KEY}',
+                'Content-Type': 'application/json',
+            }
+            
+            khalti_response = requests.post(
+                'https://a.khalti.com/api/v2/epayment/initiate/',
+                json=khalti_payload,
+                headers=headers
+            )
+            
+            if khalti_response.status_code == 200:
+                khalti_data = khalti_response.json()
+                invoice.payment_reference = khalti_data.get('pidx')
+                invoice.status = 'pending'
+                invoice.save()
+                
+                return Response({
+                    'payment_url': khalti_data.get('payment_url'),
+                    'invoice_id': invoice.invoice_id
+                })
+            else:
+                return Response({
+                    'error': 'Khalti payment initiation failed'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            return Response({
+                'error': f'Khalti error: {str(e)}'
             }, status=status.HTTP_400_BAD_REQUEST)
     
     return Response(InvoiceSerializer(invoice).data)
@@ -136,7 +184,7 @@ def confirm_payment(request):
             
             # Create or update subscription
             if invoice.invoice_type == 'premium_subscription':
-                plan_id = invoice.metadata.get('plan_id')
+                plan_id = intent.metadata.get('plan_id')
                 if plan_id:
                     plan = PremiumPlan.objects.get(id=plan_id)
                     
@@ -180,6 +228,107 @@ def confirm_payment(request):
     except stripe.error.StripeError as e:
         return Response({
             'error': f'Payment verification failed: {str(e)}'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def verify_khalti_payment(request):
+    invoice_id = request.data.get('invoice_id')
+    pidx = request.data.get('pidx')
+    
+    try:
+        invoice = Invoice.objects.get(
+            invoice_id=invoice_id,
+            user=request.user,
+            payment_reference=pidx
+        )
+    except Invoice.DoesNotExist:
+        return Response({
+            'error': 'Invalid invoice'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # Verify payment with Khalti
+        headers = {
+            'Authorization': f'Key {settings.KHALTI_SECRET_KEY}',
+            'Content-Type': 'application/json',
+        }
+        
+        khalti_verify_response = requests.post(
+            'https://a.khalti.com/api/v2/epayment/lookup/',
+            json={'pidx': pidx},
+            headers=headers
+        )
+        
+        if khalti_verify_response.status_code == 200:
+            payment_data = khalti_verify_response.json()
+            
+            if payment_data.get('status') == 'Completed':
+                # Mark invoice as paid
+                invoice.mark_as_paid()
+                
+                # Create or update subscription if premium subscription
+                if invoice.invoice_type == 'premium_subscription':
+                    # Get plan from invoice items
+                    plan_item = invoice.items.first()
+                    if plan_item and 'plan_id' in plan_item.metadata:
+                        plan = PremiumPlan.objects.get(id=plan_item.metadata['plan_id'])
+                    else:
+                        # Fallback: get plan from invoice description
+                        plan_name = plan_item.description.replace(' Subscription', '') if plan_item else 'Basic'
+                        plan = PremiumPlan.objects.filter(name__icontains=plan_name).first()
+                    
+                    if plan:
+                        # Create subscription
+                        expires_at = timezone.now()
+                        if plan.duration_days > 0:
+                            expires_at += timezone.timedelta(days=plan.duration_days)
+                        else:
+                            # Lifetime subscription
+                            expires_at += timezone.timedelta(days=36500)  # 100 years
+                        
+                        subscription, created = Subscription.objects.get_or_create(
+                            user=request.user,
+                            defaults={
+                                'plan': plan,
+                                'expires_at': expires_at,
+                                'stripe_subscription_id': pidx  # Store Khalti reference
+                            }
+                        )
+                        
+                        if not created:
+                            subscription.plan = plan
+                            subscription.expires_at = expires_at
+                            subscription.status = 'active'
+                            subscription.save()
+                        
+                        # Update user premium status
+                        request.user.is_premium = True
+                        request.user.premium_expires_at = expires_at
+                        request.user.save()
+                
+                # Handle wallet funding
+                elif invoice.invoice_type == 'wallet_funding':
+                    wallet, created = Wallet.objects.get_or_create(user=request.user)
+                    wallet.add_funds(invoice.total_amount, f"Khalti payment - Invoice {invoice.invoice_id}")
+                
+                return Response({
+                    'success': True,
+                    'message': 'Khalti payment verified successfully'
+                })
+            else:
+                return Response({
+                    'error': f'Payment not completed. Status: {payment_data.get("status")}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({
+                'error': 'Khalti payment verification failed'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        return Response({
+            'error': f'Payment verification error: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
 
 

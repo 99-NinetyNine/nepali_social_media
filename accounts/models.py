@@ -51,6 +51,12 @@ class UserProfile(models.Model):
         ],
         default='public'
     )
+    requires_follow_approval = models.BooleanField(default=False)
+    
+    # Follower counts for efficiency
+    followers_count = models.PositiveIntegerField(default=0)
+    following_count = models.PositiveIntegerField(default=0)
+    posts_count = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return f"{self.user.username}'s Profile"

@@ -68,6 +68,27 @@ export const authApi = {
   
   updateProfile: (data: any) =>
     api.patch('/auth/profile/', data),
+  
+  getPublicProfile: (username: string) =>
+    api.get(`/auth/profile/${username}/`),
+  
+  followUser: (username: string) =>
+    api.post(`/auth/follow/${username}/`),
+  
+  getFollowRequests: () =>
+    api.get('/auth/follow-requests/'),
+  
+  approveFollowRequest: (connectionId: number, action: 'approve' | 'reject') =>
+    api.post(`/auth/follow-requests/${connectionId}/`, { action }),
+  
+  getFollowers: (username: string) =>
+    api.get(`/auth/profile/${username}/followers/`),
+  
+  getFollowing: (username: string) =>
+    api.get(`/auth/profile/${username}/following/`),
+  
+  getUserPosts: (username: string) =>
+    api.get(`/auth/profile/${username}/posts/`),
 };
 
 // Posts API

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   HeartIcon, 
@@ -9,6 +9,7 @@ import {
 import { HeartIcon as HeartIconSolid } from '@heroicons/react/24/solid';
 import { Post } from '../../types';
 import { formatDistanceToNow } from 'date-fns';
+import { postsApi } from '../../services/api';
 
 interface PostCardProps {
   post: Post;
@@ -17,6 +18,87 @@ interface PostCardProps {
 }
 
 const PostCard: React.FC<PostCardProps> = ({ post, onLike, onShare }) => {
+  const postRef = useRef<HTMLDivElement>(null);
+  const [viewTracked, setViewTracked] = useState(false);
+  const [viewStartTime, setViewStartTime] = useState<number | null>(null);
+
+  // Track view when post comes into viewport
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !viewTracked) {
+            setViewStartTime(Date.now());
+            
+            // Clear any existing timeout
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+            }
+            
+            // Track view after 3 seconds of being in viewport (increased from 2)
+            timeoutId = setTimeout(() => {
+              trackView();
+              timeoutId = null;
+            }, 3000);
+            
+          } else if (!entry.isIntersecting) {
+            // Clear timeout when post goes out of view
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              timeoutId = null;
+            }
+            
+            // Only track if we had sufficient view time
+            if (viewStartTime && !viewTracked) {
+              const duration = Math.floor((Date.now() - viewStartTime) / 1000);
+              if (duration >= 3) {
+                trackView(duration);
+              }
+            }
+            setViewStartTime(null);
+          }
+        });
+      },
+      { 
+        threshold: 0.6, // Increased from 0.5 to 0.6 (60% visible)
+        rootMargin: '0px 0px -100px 0px' // Only trigger when post is well within viewport
+      }
+    );
+
+    if (postRef.current && !viewTracked) {
+      observer.observe(postRef.current);
+    }
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (postRef.current) {
+        observer.unobserve(postRef.current);
+      }
+    };
+  }, [viewTracked]);
+
+  const trackView = async (duration: number = 0) => {
+    if (viewTracked) return;
+    
+    try {
+      await fetch(`/api/posts/${post.id}/track_view/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ duration })
+      });
+      setViewTracked(true);
+    } catch (error) {
+      console.error('Error tracking view:', error);
+    }
+  };
+
   const handleLike = () => {
     if (onLike) {
       onLike(post.id, post.user_reaction === 'like' ? 'unlike' : 'like');
@@ -43,7 +125,7 @@ const PostCard: React.FC<PostCardProps> = ({ post, onLike, onShare }) => {
   };
 
   return (
-    <div className="card p-6 card-hover">
+    <div ref={postRef} className="card p-6 card-hover">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-3">
@@ -166,7 +248,7 @@ const PostCard: React.FC<PostCardProps> = ({ post, onLike, onShare }) => {
             ) : (
               <HeartIcon className="h-5 w-5" />
             )}
-            <span>{post.like_count}</span>
+            <span>{post.like_count || 0}</span>
           </button>
           
           <Link 
@@ -174,7 +256,7 @@ const PostCard: React.FC<PostCardProps> = ({ post, onLike, onShare }) => {
             className="flex items-center space-x-2 text-sm text-gray-500 hover:text-primary-600"
           >
             <ChatBubbleLeftIcon className="h-5 w-5" />
-            <span>{post.comment_count}</span>
+            <span>{post.comment_count || 0}</span>
           </Link>
           
           <button
@@ -182,7 +264,7 @@ const PostCard: React.FC<PostCardProps> = ({ post, onLike, onShare }) => {
             className="flex items-center space-x-2 text-sm text-gray-500 hover:text-green-600"
           >
             <ShareIcon className="h-5 w-5" />
-            <span>{post.share_count}</span>
+            <span>{post.share_count || 0}</span>
           </button>
         </div>
         

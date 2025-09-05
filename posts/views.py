@@ -1,5 +1,5 @@
-from rest_framework import generics, status, permissions, filters
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework import viewsets, generics, status, permissions, filters, serializers
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, F
@@ -10,6 +10,7 @@ from .serializers import (
     PostSerializer, PostCreateSerializer, LikeSerializer, 
     CommentSerializer, ShareSerializer, PostViewSerializer, HashtagSerializer
 )
+from .permissions import IsAuthorOrReadOnly, IsPremiumUser
 
 
 class PostListCreateView(generics.ListCreateAPIView):
@@ -78,7 +79,27 @@ class PostListCreateView(generics.ListCreateAPIView):
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
+        # Basic content moderation (dummy implementation)
+        from moderation.utils import moderate_post_content
+        
+        post_data = {
+            'content': serializer.validated_data.get('description', ''),
+            'title': serializer.validated_data.get('title', ''),
+            'user_data': {
+                'username': self.request.user.username,
+                'is_premium': getattr(self.request.user, 'is_premium', False)
+            }
+        }
+        
+        # Run moderation (always approves in dummy implementation)
+        moderation_result = moderate_post_content(post_data)
+        
+        # Save post with moderation status
+        post = serializer.save(author=self.request.user)
+        
+        # In production, you might store moderation results
+        # post.moderation_score = moderation_result.get('confidence', 0.95)
+        # post.save()
 
 
 class PostDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -246,3 +267,261 @@ class BoostPostView(generics.GenericAPIView):
             'success': True,
             'message': f'Post boosted with ${boost_amount}'
         })
+
+
+# Modern ViewSet-based implementation
+class PostViewSet(viewsets.ModelViewSet):
+    serializer_class = PostSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAuthorOrReadOnly]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'description', 'hashtags__hashtag__name']
+    ordering_fields = ['created_at', 'view_count', 'like_count']
+    ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return PostCreateSerializer
+        return PostSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        post_type = self.request.query_params.get('type')
+        
+        # Get user connections
+        connections = Connection.objects.filter(
+            Q(from_user=user, status='accepted') | 
+            Q(to_user=user, status='accepted')
+        )
+        connected_users = []
+        for conn in connections:
+            if conn.from_user == user:
+                connected_users.append(conn.to_user)
+            else:
+                connected_users.append(conn.from_user)
+        
+        # Base queryset - exclude expired stories
+        queryset = Post.objects.exclude(
+            post_type='story',
+            expires_at__lt=timezone.now()
+        ).select_related('author', 'author__profile').prefetch_related('media', 'hashtags__hashtag')
+        
+        # Filter by post type
+        if post_type:
+            queryset = queryset.filter(post_type=post_type)
+        
+        # Filter by privacy and connections
+        queryset = queryset.filter(
+            Q(privacy='public') |
+            Q(author=user) |
+            Q(privacy='connections', author__in=connected_users)
+        )
+        
+        return queryset
+
+    def perform_create(self, serializer):
+        # Basic content moderation (dummy implementation)
+        from moderation.utils import moderate_post_content
+        
+        post_data = {
+            'content': serializer.validated_data.get('description', ''),
+            'title': serializer.validated_data.get('title', ''),
+            'user_data': {
+                'username': self.request.user.username,
+                'is_premium': getattr(self.request.user, 'is_premium', False)
+            }
+        }
+        
+        # Run moderation (always approves in dummy implementation)
+        moderate_post_content(post_data)
+        
+        # Save post with moderation status
+        serializer.save(author=self.request.user)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        
+        # Record view if not the author and user is authenticated
+        if request.user.is_authenticated and request.user != instance.author:
+            # Check if this user has already viewed this post in the last hour
+            # to prevent spam views
+            from django.utils import timezone
+            one_hour_ago = timezone.now() - timezone.timedelta(hours=1)
+            
+            recent_view = PostView.objects.filter(
+                user=request.user,
+                post=instance,
+                created_at__gte=one_hour_ago
+            ).exists()
+            
+            if not recent_view:
+                PostView.objects.create(
+                    user=request.user,
+                    post=instance,
+                    ip_address=self.get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', '')[:200]
+                )
+                # Update view count
+                Post.objects.filter(id=instance.id).update(view_count=F('view_count') + 1)
+        
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+    def get_client_ip(self, request):
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0]
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        return ip
+
+    @action(detail=True, methods=['post'])
+    def like(self, request, pk=None):
+        """Like or unlike a post"""
+        post = self.get_object()
+        reaction_type = request.data.get('reaction_type', 'like')
+        
+        like, created = Like.objects.get_or_create(
+            user=request.user,
+            post=post,
+            defaults={'reaction_type': reaction_type}
+        )
+        
+        if not created:
+            if like.reaction_type == reaction_type:
+                # Remove like if same reaction
+                like.delete()
+                Post.objects.filter(id=post.id).update(like_count=F('like_count') - 1)
+                return Response({'message': 'Reaction removed', 'liked': False})
+            else:
+                # Update reaction type
+                like.reaction_type = reaction_type
+                like.save()
+        else:
+            # Increment like count
+            Post.objects.filter(id=post.id).update(like_count=F('like_count') + 1)
+        
+        return Response({'message': 'Post liked', 'liked': True, 'reaction_type': reaction_type})
+
+    @action(detail=True, methods=['post'])
+    def share(self, request, pk=None):
+        """Share a post"""
+        post = self.get_object()
+        message = request.data.get('message', '')
+        
+        share, created = Share.objects.get_or_create(
+            user=request.user,
+            post=post,
+            defaults={'message': message}
+        )
+        
+        if created:
+            # Increment share count
+            Post.objects.filter(id=post.id).update(share_count=F('share_count') + 1)
+            return Response({'message': 'Post shared successfully'})
+        
+        return Response({'message': 'Already shared'}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['get'])
+    def comments(self, request, pk=None):
+        """Get comments for a post"""
+        post = self.get_object()
+        comments = Comment.objects.filter(post=post, parent=None).order_by('-created_at')
+        serializer = CommentSerializer(comments, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def add_comment(self, request, pk=None):
+        """Add a comment to a post"""
+        post = self.get_object()
+        content = request.data.get('content')
+        parent_id = request.data.get('parent')
+        
+        if not content:
+            return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        parent = None
+        if parent_id:
+            try:
+                parent = Comment.objects.get(id=parent_id, post=post)
+            except Comment.DoesNotExist:
+                return Response({'error': 'Parent comment not found'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        comment = Comment.objects.create(
+            user=request.user,
+            post=post,
+            content=content,
+            parent=parent
+        )
+        
+        # Update comment count
+        Post.objects.filter(id=post.id).update(comment_count=F('comment_count') + 1)
+        
+        serializer = CommentSerializer(comment)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, IsPremiumUser])
+    def boost(self, request, pk=None):
+        """Boost a post (premium feature)"""
+        post = self.get_object()
+        
+        if post.author != request.user:
+            return Response({'error': 'You can only boost your own posts'}, status=status.HTTP_403_FORBIDDEN)
+        
+        post.is_boosted = True
+        post.save()
+        
+        return Response({'message': 'Post boosted successfully'})
+
+    @action(detail=False, methods=['get'])
+    def my_posts(self, request):
+        """Get current user's posts"""
+        posts = Post.objects.filter(author=request.user).order_by('-created_at')
+        page = self.paginate_queryset(posts)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(posts, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def trending(self, request):
+        """Get trending posts"""
+        trending_posts = Post.objects.filter(
+            created_at__gte=timezone.now() - timezone.timedelta(days=7)
+        ).order_by('-view_count', '-like_count')[:20]
+        
+        serializer = self.get_serializer(trending_posts, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def track_view(self, request, pk=None):
+        """Track a post view (for home feed impressions)"""
+        post = self.get_object()
+        
+        # Only track if not the author
+        if request.user.is_authenticated and request.user != post.author:
+            from django.utils import timezone
+            one_hour_ago = timezone.now() - timezone.timedelta(hours=1)
+            
+            # Check for recent view to prevent spam
+            recent_view = PostView.objects.filter(
+                user=request.user,
+                post=post,
+                created_at__gte=one_hour_ago
+            ).exists()
+            
+            if not recent_view:
+                PostView.objects.create(
+                    user=request.user,
+                    post=post,
+                    ip_address=self.get_client_ip(request),
+                    user_agent=request.META.get('HTTP_USER_AGENT', '')[:200],
+                    view_duration=request.data.get('duration', 0)  # Time spent viewing
+                )
+                # Update view count
+                Post.objects.filter(id=post.id).update(view_count=F('view_count') + 1)
+                
+                return Response({'message': 'View tracked'})
+        
+        return Response({'message': 'View not tracked'})

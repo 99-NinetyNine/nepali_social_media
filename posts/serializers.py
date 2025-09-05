@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from accounts.serializers import UserSerializer
-from .models import Post, PostMedia, Like, Comment, CommentLike, Share, PostView, Hashtag
+from .models import Post, PostMedia, Like, Comment, CommentLike, Share, PostView, Hashtag, PostHashtag
 
 
 class PostMediaSerializer(serializers.ModelSerializer):
@@ -52,7 +52,7 @@ class ShareSerializer(serializers.ModelSerializer):
 class PostSerializer(serializers.ModelSerializer):
     author = UserSerializer(read_only=True)
     media = PostMediaSerializer(many=True, read_only=True)
-    hashtags = HashtagSerializer(many=True, read_only=True)
+    hashtags = serializers.SerializerMethodField()
     user_reaction = serializers.SerializerMethodField()
     is_shared_by_user = serializers.SerializerMethodField()
 
@@ -77,26 +77,33 @@ class PostSerializer(serializers.ModelSerializer):
             return Share.objects.filter(user=request.user, post=obj).exists()
         return False
 
+    def get_hashtags(self, obj):
+        hashtag_relations = obj.hashtags.select_related('hashtag').all()
+        return HashtagSerializer([rel.hashtag for rel in hashtag_relations], many=True).data
+
 
 class PostCreateSerializer(serializers.ModelSerializer):
     hashtags = serializers.ListField(
         child=serializers.CharField(max_length=100),
         required=False,
-        allow_empty=True
+        allow_empty=True,
+        write_only=True
     )
     media_files = serializers.ListField(
         child=serializers.FileField(),
         required=False,
-        allow_empty=True
+        allow_empty=True,
+        write_only=True
     )
 
     class Meta:
         model = Post
         fields = (
-            'title', 'description', 'post_type', 'privacy', 
+            'id', 'title', 'description', 'post_type', 'privacy', 
             'is_monetized', 'allow_comments', 'allow_sharing',
-            'hashtags', 'media_files'
+            'hashtags', 'media_files', 'created_at', 'updated_at'
         )
+        read_only_fields = ('id', 'created_at', 'updated_at')
 
     def create(self, validated_data):
         hashtags = validated_data.pop('hashtags', [])
@@ -113,7 +120,7 @@ class PostCreateSerializer(serializers.ModelSerializer):
             else:
                 hashtag.post_count += 1
             hashtag.save()
-            post.hashtags.create(hashtag=hashtag)
+            PostHashtag.objects.create(post=post, hashtag=hashtag)
         
         # Handle media files
         for i, media_file in enumerate(media_files):
@@ -126,6 +133,29 @@ class PostCreateSerializer(serializers.ModelSerializer):
             )
         
         return post
+
+    def to_representation(self, instance):
+        """
+        Convert the post instance to a dictionary representation for the response.
+        This avoids the RelatedManager issue by using a simplified representation.
+        """
+        return {
+            'id': instance.id,
+            'title': instance.title,
+            'description': instance.description,
+            'post_type': instance.post_type,
+            'privacy': instance.privacy,
+            'is_monetized': instance.is_monetized,
+            'allow_comments': instance.allow_comments,
+            'allow_sharing': instance.allow_sharing,
+            'created_at': instance.created_at,
+            'updated_at': instance.updated_at,
+            'author': instance.author.id,
+            'view_count': instance.view_count,
+            'like_count': instance.like_count,
+            'comment_count': instance.comment_count,
+            'share_count': instance.share_count,
+        }
 
 
 class PostViewSerializer(serializers.ModelSerializer):

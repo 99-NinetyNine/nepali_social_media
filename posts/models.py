@@ -8,11 +8,9 @@ User = get_user_model()
 
 class Post(models.Model):
     POST_TYPES = [
-        ('facebook', 'Facebook Post'),
-        ('linkedin', 'LinkedIn Post'),
-        ('instagram', 'Instagram Post'),
-        ('youtube_shorts', 'YouTube Shorts'),
-        ('youtube_video', 'YouTube Video'),
+        ('post', 'Regular Post'),
+        ('job', 'Job Posting'),
+        ('short', 'Short Video'),
         ('story', 'Story (24h)'),
         ('ad', 'Advertisement'),
     ]
@@ -89,10 +87,31 @@ class PostMedia(models.Model):
     file = models.FileField(upload_to='post_media/')
     thumbnail = models.ImageField(upload_to='post_thumbnails/', null=True, blank=True)
     alt_text = models.CharField(max_length=200, blank=True)
+    duration = models.PositiveIntegerField(null=True, blank=True, help_text="Duration in seconds for videos")
+    file_size = models.PositiveIntegerField(null=True, blank=True, help_text="File size in bytes")
     order = models.PositiveIntegerField(default=0)
+    
+    # Text overlay for images (stories)
+    text_overlay = models.TextField(blank=True, help_text="Text overlay for story images")
+    text_position = models.CharField(max_length=20, choices=[
+        ('top', 'Top'),
+        ('middle', 'Middle'),
+        ('bottom', 'Bottom')
+    ], default='middle', blank=True)
 
     class Meta:
         ordering = ['order']
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        
+        if self.media_type == 'video' and self.duration:
+            # Story videos: max 20 seconds
+            if self.post.post_type == 'story' and self.duration > 20:
+                raise ValidationError("Story videos cannot exceed 20 seconds")
+            # Short videos: max 2 minutes (120 seconds)  
+            elif self.post.post_type == 'short' and self.duration > 120:
+                raise ValidationError("Short videos cannot exceed 2 minutes")
 
     def __str__(self):
         return f"{self.media_type} for {self.post}"

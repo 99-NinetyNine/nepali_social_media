@@ -31,7 +31,7 @@ export interface Post {
   author: User;
   title: string;
   description: string;
-  post_type: 'facebook' | 'linkedin' | 'instagram' | 'youtube_shorts' | 'youtube_video' | 'story' | 'ad';
+  post_type: 'post' | 'job' | 'short' | 'story' | 'ad';
   privacy: 'public' | 'connections' | 'private';
   is_monetized: boolean;
   allow_comments: boolean;
@@ -57,6 +57,10 @@ export interface PostMedia {
   thumbnail: string | null;
   alt_text: string;
   order: number;
+  duration?: number;
+  file_size?: number;
+  text_overlay?: string;
+  text_position?: 'top' | 'middle' | 'bottom';
 }
 
 export interface Hashtag {

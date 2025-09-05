@@ -35,6 +35,7 @@ class Invoice(models.Model):
         ('delivery_fee', 'Delivery Fee'),
         ('driver_payment', 'Driver Payment'),
         ('creator_reward', 'Creator Reward'),
+        ('wallet_funding', 'Wallet Funding'),
     ]
 
     STATUS_CHOICES = [
@@ -48,6 +49,7 @@ class Invoice(models.Model):
 
     PAYMENT_METHODS = [
         ('stripe', 'Stripe'),
+        ('khalti', 'Khalti'),
         ('cash_on_delivery', 'Cash on Delivery'),
         ('bank_transfer', 'Bank Transfer'),
         ('digital_wallet', 'Digital Wallet'),
@@ -149,6 +151,7 @@ class Subscription(models.Model):
 class Payment(models.Model):
     PAYMENT_METHODS = [
         ('stripe', 'Stripe'),
+        ('khalti', 'Khalti'),
         ('cash', 'Cash'),
         ('bank_transfer', 'Bank Transfer'),
         ('digital_wallet', 'Digital Wallet'),
