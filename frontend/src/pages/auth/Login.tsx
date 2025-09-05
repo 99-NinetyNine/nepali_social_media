@@ -19,7 +19,7 @@ const Login: React.FC = () => {
 
   const fetchGoogleAuthUrl = async () => {
     try {
-      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:8000/api'}/accounts/google/auth-url/`);
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:8000/api'}/auth/google/auth-url/`);
       const data = await response.json();
       setGoogleAuthUrl(data.auth_url);
     } catch (error) {

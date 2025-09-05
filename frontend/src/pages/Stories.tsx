@@ -19,7 +19,7 @@ const Stories: React.FC = () => {
   const fetchStories = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/posts/?post_type=story', {
+      const response = await fetch('http://localhost:8000/api/posts/?post_type=story', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
