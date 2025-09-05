@@ -52,13 +52,15 @@ interface Post {
   author: any;
   title: string;
   description: string;
-  post_type: string;
-  privacy: string;
+  post_type: 'post' | 'job' | 'short' | 'story' | 'ad';
+  privacy: 'public' | 'connections' | 'private';
   is_monetized: boolean;
   allow_comments: boolean;
   allow_sharing: boolean;
   created_at: string;
+  updated_at: string;
   like_count: number;
+  dislike_count: number;
   comment_count: number;
   share_count: number;
   view_count: number;
@@ -66,7 +68,9 @@ interface Post {
   hashtags: any[];
   user_reaction: string | null;
   is_shared_by_user: boolean;
-  is_boosted?: boolean;
+  is_boosted: boolean;
+  has_access: boolean;
+  is_subscription_required: boolean;
 }
 
 const Profile: React.FC = () => {

@@ -54,10 +54,37 @@ class Post(models.Model):
     class Meta:
         ordering = ['-created_at']
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        
+        # Monetization and ads cannot both be true
+        if self.is_monetized and self.is_boosted:
+            raise ValidationError("A post cannot be both monetized and boosted as an ad.")
+    
     def save(self, *args, **kwargs):
+        self.clean()
+        
         if self.post_type == 'story' and not self.expires_at:
             self.expires_at = timezone.now() + timedelta(hours=24)
         super().save(*args, **kwargs)
+    
+    def is_accessible_to_user(self, user):
+        """Check if user can access this monetized content"""
+        if not self.is_monetized:
+            return True
+            
+        if user == self.author:
+            return True
+            
+        # Check if user has active subscription to the creator
+        from accounts.models import Subscription
+        subscription = Subscription.objects.filter(
+            subscriber=user,
+            creator=self.author,
+            is_active=True
+        ).first()
+        
+        return subscription and subscription.is_current() if subscription else False
 
     def is_story_expired(self):
         if self.post_type == 'story' and self.expires_at:

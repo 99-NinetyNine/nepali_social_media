@@ -4,7 +4,9 @@ import {
   HeartIcon, 
   ChatBubbleLeftIcon, 
   ShareIcon,
-  EllipsisHorizontalIcon 
+  EllipsisHorizontalIcon,
+  LockClosedIcon,
+  StarIcon 
 } from '@heroicons/react/24/outline';
 import { HeartIcon as HeartIconSolid } from '@heroicons/react/24/solid';
 import { Post } from '../../types';
@@ -182,8 +184,42 @@ const PostCard: React.FC<PostCardProps> = ({ post, onLike, onShare }) => {
         </p>
       </div>
 
-      {/* Media */}
-      {post.media && post.media.length > 0 && (
+      {/* Subscription Gate for Locked Content */}
+      {post.is_subscription_required && !post.has_access && (
+        <div className="mb-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-6">
+          <div className="text-center">
+            <div className="flex items-center justify-center mb-3">
+              <div className="bg-purple-100 rounded-full p-3">
+                <LockClosedIcon className="h-8 w-8 text-purple-600" />
+              </div>
+            </div>
+            <h4 className="text-lg font-semibold text-purple-900 mb-2">
+              Exclusive Content
+            </h4>
+            <p className="text-purple-700 mb-4">
+              This content is available to subscribers only. Subscribe to {post.author.first_name || post.author.username} to unlock exclusive posts and media.
+            </p>
+            <div className="flex items-center justify-center space-x-3">
+              <Link 
+                to={`/profile/${post.author.username}`}
+                className="btn btn-primary flex items-center"
+              >
+                <StarIcon className="h-4 w-4 mr-2" />
+                Subscribe Now
+              </Link>
+              <Link 
+                to={`/profile/${post.author.username}`}
+                className="btn btn-outline text-sm"
+              >
+                View Profile
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Media - Only show if user has access */}
+      {post.media && post.media.length > 0 && post.has_access && (
         <div className="mb-4">
           {post.media.length === 1 ? (
             <div className="rounded-lg overflow-hidden">

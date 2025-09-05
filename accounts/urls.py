@@ -1,11 +1,17 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from .views import (
     RegisterView, login_view, ProfileView, UserListView,
     ConnectUserView, ConnectionListView, CompanyListCreateView,
     JobListCreateView, JobApplicationView, PublicProfileView,
     UserPostsView, follow_user, approve_follow_request, 
-    follow_requests, followers_list, following_list
+    follow_requests, followers_list, following_list,
+    SubscriptionViewSet, subscribe_to_creator, add_credits,
+    credit_transactions, subscription_status
 )
+
+router = DefaultRouter()
+router.register(r'subscriptions', SubscriptionViewSet, basename='subscription')
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='register'),
@@ -26,4 +32,11 @@ urlpatterns = [
     path('follow-requests/<int:connection_id>/', approve_follow_request, name='approve-follow'),
     path('profile/<str:username>/followers/', followers_list, name='followers-list'),
     path('profile/<str:username>/following/', following_list, name='following-list'),
+    
+    # Subscription endpoints
+    path('', include(router.urls)),
+    path('subscribe/<str:username>/', subscribe_to_creator, name='subscribe-to-creator'),
+    path('credits/add/', add_credits, name='add-credits'),
+    path('credits/transactions/', credit_transactions, name='credit-transactions'),
+    path('subscription-status/<str:username>/', subscription_status, name='subscription-status'),
 ]

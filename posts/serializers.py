@@ -55,6 +55,8 @@ class PostSerializer(serializers.ModelSerializer):
     hashtags = serializers.SerializerMethodField()
     user_reaction = serializers.SerializerMethodField()
     is_shared_by_user = serializers.SerializerMethodField()
+    has_access = serializers.SerializerMethodField()
+    is_subscription_required = serializers.SerializerMethodField()
 
     class Meta:
         model = Post
@@ -80,6 +82,28 @@ class PostSerializer(serializers.ModelSerializer):
     def get_hashtags(self, obj):
         hashtag_relations = obj.hashtags.select_related('hashtag').all()
         return HashtagSerializer([rel.hashtag for rel in hashtag_relations], many=True).data
+
+    def get_has_access(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.is_accessible_to_user(request.user)
+        return not obj.is_monetized
+
+    def get_is_subscription_required(self, obj):
+        return obj.is_monetized
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        
+        # If content is monetized and user doesn't have access, hide sensitive content
+        if instance.is_monetized and not self.get_has_access(instance):
+            data['description'] = "🔒 This content is available to subscribers only. Subscribe to view this content."
+            data['media'] = []
+            # Keep basic info for preview
+            data['title'] = data.get('title', '')
+        
+        return data
 
 
 class PostCreateSerializer(serializers.ModelSerializer):

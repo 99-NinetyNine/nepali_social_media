@@ -46,6 +46,8 @@ export interface Post {
   hashtags: Hashtag[];
   user_reaction: string | null;
   is_shared_by_user: boolean;
+  has_access: boolean;
+  is_subscription_required: boolean;
   created_at: string;
   updated_at: string;
 }

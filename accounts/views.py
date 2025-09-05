@@ -5,10 +5,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, F
-from .models import User, UserProfile, Connection, Company, Job, JobApplication
+from .models import User, UserProfile, Connection, Company, Job, JobApplication, Subscription, CreditTransaction
 from .serializers import (
     UserRegistrationSerializer, UserSerializer, UserProfileSerializer,
-    ConnectionSerializer, CompanySerializer, JobSerializer, JobApplicationSerializer
+    ConnectionSerializer, CompanySerializer, JobSerializer, JobApplicationSerializer,
+    SubscriptionSerializer, SubscriptionCreateSerializer, CreditTransactionSerializer
 )
 
 
@@ -436,3 +437,169 @@ def following_list(request, username):
         })
     
     return Response(data)
+
+
+class SubscriptionViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing user subscriptions"""
+    serializer_class = SubscriptionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        if self.action in ['list', 'retrieve']:
+            # Show user's subscriptions or subscriptions to them
+            return Subscription.objects.filter(
+                Q(subscriber=self.request.user) | Q(creator=self.request.user)
+            )
+        return Subscription.objects.none()
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return SubscriptionCreateSerializer
+        return SubscriptionSerializer
+
+    @action(detail=False, methods=['get'])
+    def my_subscriptions(self, request):
+        """Get subscriptions made by current user"""
+        subscriptions = Subscription.objects.filter(subscriber=request.user, is_active=True)
+        serializer = self.get_serializer(subscriptions, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def my_subscribers(self, request):
+        """Get users subscribed to current user"""
+        subscriptions = Subscription.objects.filter(creator=request.user, is_active=True)
+        serializer = self.get_serializer(subscriptions, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel a subscription"""
+        subscription = self.get_object()
+        
+        # Only subscriber or creator can cancel
+        if request.user not in [subscription.subscriber, subscription.creator]:
+            return Response({
+                'error': 'You cannot cancel this subscription'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        subscription.is_active = False
+        subscription.auto_renew = False
+        subscription.save()
+        
+        return Response({
+            'message': 'Subscription cancelled successfully'
+        })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def subscribe_to_creator(request, username):
+    """Subscribe to a creator"""
+    creator = get_object_or_404(User, username=username)
+    
+    if creator == request.user:
+        return Response({
+            'error': 'Cannot subscribe to yourself'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not creator.profile.allow_subscriptions:
+        return Response({
+            'error': 'This creator is not accepting subscriptions'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Check if already subscribed
+    existing = Subscription.objects.filter(
+        subscriber=request.user,
+        creator=creator,
+        is_active=True
+    ).exists()
+    
+    if existing:
+        return Response({
+            'error': 'You are already subscribed to this creator'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Create subscription with creator's monthly fee
+    serializer = SubscriptionCreateSerializer(
+        data={
+            'creator': creator.id,
+            'monthly_fee': creator.profile.monthly_subscription_fee
+        },
+        context={'request': request}
+    )
+    
+    if serializer.is_valid():
+        subscription = serializer.save()
+        return Response({
+            'message': f'Successfully subscribed to {creator.username}',
+            'subscription': SubscriptionSerializer(subscription).data
+        }, status=status.HTTP_201_CREATED)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def add_credits(request):
+    """Add credits to user account (simplified - in real app would integrate with payment gateway)"""
+    amount = request.data.get('amount')
+    
+    if not amount or float(amount) <= 0:
+        return Response({
+            'error': 'Invalid amount'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    amount = float(amount)
+    
+    # In real app, this would process payment first
+    profile = request.user.profile
+    balance_before = profile.credit_balance
+    profile.credit_balance += amount
+    profile.save()
+    
+    # Record transaction
+    CreditTransaction.objects.create(
+        user=request.user,
+        amount=amount,
+        transaction_type='add_funds',
+        description=f'Added ${amount} to account',
+        balance_before=balance_before,
+        balance_after=profile.credit_balance
+    )
+    
+    return Response({
+        'message': f'Successfully added ${amount} to your account',
+        'new_balance': profile.credit_balance
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def credit_transactions(request):
+    """Get user's credit transaction history"""
+    transactions = CreditTransaction.objects.filter(
+        user=request.user
+    ).order_by('-created_at')
+    
+    serializer = CreditTransactionSerializer(transactions, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def subscription_status(request, username):
+    """Check if current user is subscribed to a specific creator"""
+    creator = get_object_or_404(User, username=username)
+    
+    subscription = Subscription.objects.filter(
+        subscriber=request.user,
+        creator=creator,
+        is_active=True
+    ).first()
+    
+    return Response({
+        'is_subscribed': bool(subscription and subscription.is_current()),
+        'subscription': SubscriptionSerializer(subscription).data if subscription else None,
+        'creator_subscription_fee': creator.profile.monthly_subscription_fee,
+        'creator_accepts_subscriptions': creator.profile.allow_subscriptions
+    })
