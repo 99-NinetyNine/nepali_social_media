@@ -25,7 +25,11 @@ class GoogleOAuth:
                     "redirect_uris": [self.redirect_uri]
                 }
             },
-            scopes=['openid', 'email', 'profile']
+            scopes=[
+                'https://www.googleapis.com/auth/userinfo.email',
+                'https://www.googleapis.com/auth/userinfo.profile', 
+                'openid'
+            ]
         )
         flow.redirect_uri = self.redirect_uri
         
@@ -46,7 +50,11 @@ class GoogleOAuth:
                     "redirect_uris": [self.redirect_uri]
                 }
             },
-            scopes=['openid', 'email', 'profile']
+            scopes=[
+                'https://www.googleapis.com/auth/userinfo.email',
+                'https://www.googleapis.com/auth/userinfo.profile', 
+                'openid'
+            ]
         )
         flow.redirect_uri = self.redirect_uri
         

@@ -7,12 +7,13 @@ from django.contrib.auth import authenticate
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, F
 from django.utils import timezone
-from .models import User, UserProfile, Connection, Company, Job, JobApplication, Subscription, CreditTransaction
+from .models import User, UserProfile, Connection, Company, Job, JobApplication, Subscription, CreditTransaction, TierSubscriptionPurchase
 from .serializers import (
-    UserRegistrationSerializer, UserSerializer, UserProfileSerializer,
+    UserRegistrationSerializer, UserSerializer, UserProfileSerializer, ProfileWithUserSerializer,
     ConnectionSerializer, CompanySerializer, JobSerializer, JobApplicationSerializer,
     SubscriptionSerializer, SubscriptionCreateSerializer, CreditTransactionSerializer,
-    GoogleAuthSerializer, GoogleAuthUrlSerializer, CompleteProfileSerializer
+    GoogleAuthSerializer, GoogleAuthUrlSerializer, CompleteProfileSerializer,
+    TierSubscriptionPurchaseSerializer, PurchaseSubscriptionTierSerializer, SubscriptionTierInfoSerializer
 )
 
 
@@ -61,8 +62,12 @@ def login_view(request):
 
 
 class ProfileView(generics.RetrieveUpdateAPIView):
-    serializer_class = UserProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.request.method == 'GET':
+            return ProfileWithUserSerializer
+        return UserProfileSerializer
 
     def get_object(self):
         profile, created = UserProfile.objects.get_or_create(user=self.request.user)
@@ -457,7 +462,7 @@ class JobApplicationView(generics.CreateAPIView):
 
 class PublicProfileView(generics.RetrieveAPIView):
     """Public profile view accessible by username"""
-    serializer_class = UserProfileSerializer
+    serializer_class = ProfileWithUserSerializer
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = 'user__username'
     lookup_url_kwarg = 'username'
@@ -953,11 +958,26 @@ def google_auth_url(request):
     return Response(serializer.to_representation(None))
 
 
-@api_view(['POST'])
+@api_view(['GET', 'POST'])
 @permission_classes([permissions.AllowAny])
 def google_auth_callback(request):
     """Handle Google OAuth callback"""
-    serializer = GoogleAuthSerializer(data=request.data)
+    # Google sends GET request with code in query params
+    if request.method == 'GET':
+        code = request.GET.get('code')
+        state = request.GET.get('state')
+        
+        if not code:
+            return Response({
+                'error': 'Authorization code not provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Use code in serializer
+        serializer = GoogleAuthSerializer(data={'code': code, 'state': state})
+    else:
+        # POST request with data in body
+        serializer = GoogleAuthSerializer(data=request.data)
+    
     if serializer.is_valid():
         return Response(serializer.validated_data)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -975,3 +995,225 @@ def complete_profile(request):
             'user': UserSerializer(user).data
         })
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def purchase_tick(request):
+    """Purchase a cultural tick badge"""
+    tick_type = request.data.get('tick_type')
+    duration_months = int(request.data.get('duration_months', 1))
+    
+    if tick_type not in ['blue', 'gold', 'business', 'special']:
+        return Response({
+            'error': 'Invalid tick type'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Pricing for different ticks (in credits)
+    tick_prices = {
+        'blue': 100,     # LaliGurans Badge 🌺
+        'gold': 250,     # Sagarmatha Badge 🏔️  
+        'business': 150, # Dhaka Badge 🧵
+        'special': 200   # Pashupatinath Badge 🕉️
+    }
+    
+    total_cost = tick_prices[tick_type] * duration_months
+    
+    # Check if user has enough credits
+    if request.user.account_balance < total_cost:
+        return Response({
+            'error': f'Insufficient credits. Need {total_cost} credits.',
+            'required': total_cost,
+            'current_balance': float(request.user.account_balance)
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Process purchase
+    from django.utils import timezone
+    from datetime import timedelta
+    
+    request.user.account_balance -= total_cost
+    request.user.purchased_tick = tick_type
+    
+    # Extend or set expiry
+    if request.user.tick_expires_at and request.user.tick_expires_at > timezone.now():
+        # Extend existing tick
+        request.user.tick_expires_at += timedelta(days=30 * duration_months)
+    else:
+        # New tick
+        request.user.tick_expires_at = timezone.now() + timedelta(days=30 * duration_months)
+    
+    request.user.save()
+    
+    # Record transaction
+    CreditTransaction.objects.create(
+        user=request.user,
+        amount=-total_cost,
+        transaction_type='tick_purchase',
+        description=f'Purchased {tick_type} tick for {duration_months} months',
+        balance_before=request.user.account_balance + total_cost,
+        balance_after=request.user.account_balance
+    )
+    
+    tick_names = {
+        'blue': 'Blue Tick (LaliGurans Badge) 🌺',
+        'gold': 'Golden Tick (Sagarmatha Badge) 🏔️',
+        'business': 'Business Tick (Dhaka Badge) 🧵',
+        'special': 'Special Tick (Pashupatinath Badge) 🕉️'
+    }
+    
+    return Response({
+        'message': f'Successfully purchased {tick_names[tick_type]}!',
+        'tick_type': tick_type,
+        'expires_at': request.user.tick_expires_at,
+        'new_balance': float(request.user.account_balance)
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def purchase_premium(request):
+    """Legacy endpoint - redirects to new subscription tier system"""
+    # This endpoint is deprecated in favor of the new subscription tier system
+    # But keeping it for backward compatibility
+    
+    return Response({
+        'message': 'Premium purchase has been replaced by the subscription tier system.',
+        'redirect_to': '/api/auth/subscription-tiers/',
+        'new_endpoint': '/api/auth/purchase/subscription-tier/',
+        'help': 'Use the new subscription tier system for better features and pricing.'
+    }, status=status.HTTP_410_GONE)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def get_purchase_options(request):
+    """Get available ticks and premium options with pricing"""
+    
+    tick_options = [
+        {
+            'type': 'blue',
+            'name': 'Blue Tick (LaliGurans Badge) 🌺',
+            'description': 'National identity badge',
+            'price_per_month': 100,
+            'vibe': 'National identity'
+        },
+        {
+            'type': 'gold', 
+            'name': 'Golden Tick (Sagarmatha Badge) 🏔️',
+            'description': 'Highest honor badge',
+            'price_per_month': 250,
+            'vibe': 'Highest honor'
+        },
+        {
+            'type': 'business',
+            'name': 'Business Tick (Dhaka Badge) 🧵', 
+            'description': 'Traditional + premium badge',
+            'price_per_month': 150,
+            'vibe': 'Traditional + premium'
+        },
+        {
+            'type': 'special',
+            'name': 'Special Tick (Pashupatinath Badge) 🕉️',
+            'description': 'Cultural prestige badge', 
+            'price_per_month': 200,
+            'vibe': 'Cultural prestige'
+        }
+    ]
+    
+    premium_option = {
+        'name': 'Premium Subscription',
+        'description': '10 media files, no ads, extra features',
+        'price_per_month': 50,
+        'features': [
+            '10 media files per post (vs 5 for free)',
+            'Ad-free experience', 
+            'Priority support',
+            'Advanced analytics'
+        ]
+    }
+    
+    return Response({
+        'ticks': tick_options,
+        'premium': premium_option,
+        'current_balance': float(request.user.account_balance),
+        'current_tick': request.user.get_active_tick(),
+        'current_subscription_tier': request.user.get_subscription_tier(),
+        'subscription_expires': request.user.subscription_expires_at
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def subscription_tiers(request):
+    """Get all available subscription tiers with pricing"""
+    tiers = SubscriptionTierInfoSerializer.get_all_tiers()
+    current_tier = request.user.get_subscription_tier()
+    
+    # Add upgrade cost information for each tier
+    for tier in tiers:
+        if tier['tier'] > current_tier:
+            total_cost, credit_applied, amount_to_pay = TierSubscriptionPurchase.calculate_upgrade_cost(
+                request.user, tier['tier'], is_yearly=False
+            )
+            yearly_total, yearly_credit, yearly_amount = TierSubscriptionPurchase.calculate_upgrade_cost(
+                request.user, tier['tier'], is_yearly=True
+            )
+            
+            tier['upgrade_cost'] = {
+                'monthly': {
+                    'total_cost': float(total_cost),
+                    'credit_applied': float(credit_applied),
+                    'amount_to_pay': float(amount_to_pay)
+                },
+                'yearly': {
+                    'total_cost': float(yearly_total),
+                    'credit_applied': float(yearly_credit),
+                    'amount_to_pay': float(yearly_amount)
+                }
+            }
+        else:
+            tier['upgrade_cost'] = None
+    
+    return Response({
+        'tiers': tiers,
+        'current_tier': current_tier,
+        'current_balance': float(request.user.profile.credit_balance),
+        'subscription_expires': request.user.subscription_expires_at,
+        'is_yearly': request.user.is_yearly_subscription
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def purchase_subscription_tier(request):
+    """Purchase/upgrade subscription tier"""
+    serializer = PurchaseSubscriptionTierSerializer(data=request.data, context={'request': request})
+    
+    if serializer.is_valid():
+        purchase = serializer.save()
+        return Response({
+            'message': f'Successfully upgraded to Tier {purchase.to_tier}',
+            'purchase': TierSubscriptionPurchaseSerializer(purchase).data,
+            'new_tier': request.user.get_subscription_tier(),
+            'remaining_balance': float(request.user.profile.credit_balance)
+        })
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def user_subscription_status(request):
+    """Get current user's subscription status and limits"""
+    user = request.user
+    
+    return Response({
+        'current_tier': user.get_subscription_tier(),
+        'subscription_expires': user.subscription_expires_at,
+        'is_yearly': user.is_yearly_subscription,
+        'daily_post_limit': user.get_daily_post_limit(),
+        'media_per_post_limit': user.get_media_per_post_limit(),
+        'shows_ads': user.should_see_ads(),
+        'subscription_badge': user.get_subscription_badge(),
+        'credit_balance': float(user.profile.credit_balance)
+    })

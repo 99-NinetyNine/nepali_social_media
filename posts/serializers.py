@@ -124,7 +124,7 @@ class PostCreateSerializer(serializers.ModelSerializer):
         model = Post
         fields = (
             'id', 'title', 'description', 'post_type', 'privacy', 
-            'is_monetized', 'allow_comments', 'allow_sharing',
+            'is_monetized', 'allow_comments', 'allow_sharing', 'is_advertisement',
             'hashtags', 'media_files', 'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'created_at', 'updated_at')

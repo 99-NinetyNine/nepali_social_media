@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
+import { authApi } from '../../services/api';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import toast from 'react-hot-toast';
 
 const GoogleCallback: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { setUser } = useAuthStore();
+  const { setUser, updateToken } = useAuthStore();
   const [processing, setProcessing] = useState(true);
   const [showCompleteProfile, setShowCompleteProfile] = useState(false);
   const [profileData, setProfileData] = useState({
@@ -35,25 +36,19 @@ const GoogleCallback: React.FC = () => {
       }
 
       try {
-        const response = await fetch('/api/auth/google/callback/', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ code }),
-        });
+        const response = await authApi.handleGoogleCallback({ code });
 
-        const data = await response.json();
-
-        if (response.ok) {
-          // Store tokens
-          localStorage.setItem('token', data.access_token);
-          localStorage.setItem('refresh_token', data.refresh_token);
-          localStorage.setItem('user', JSON.stringify(data.user));
+        if (response.data.user && response.data.access_token) {
+          // Store user and tokens using Zustand
+          setUser(response.data.user);
+          updateToken(response.data.access_token);
           
-          setUser(data.user);
+          // Store refresh token (handled by Zustand persist)
+          useAuthStore.setState({ 
+            refreshToken: response.data.refresh_token 
+          });
 
-          if (data.created) {
+          if (response.data.created) {
             // New user - show profile completion form
             setShowCompleteProfile(true);
             setProcessing(false);
@@ -64,7 +59,7 @@ const GoogleCallback: React.FC = () => {
             navigate('/');
           }
         } else {
-          throw new Error(data.error || 'Authentication failed');
+          throw new Error('Authentication failed - invalid response from server');
         }
       } catch (error: any) {
         console.error('Google auth error:', error);
@@ -84,25 +79,10 @@ const GoogleCallback: React.FC = () => {
     e.preventDefault();
     
     try {
-      const response = await fetch('/api/auth/complete-profile/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(profileData)
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        localStorage.setItem('user', JSON.stringify(data.user));
-        setUser(data.user);
-        toast.success('Profile completed successfully!');
-        navigate('/');
-      } else {
-        const error = await response.json();
-        toast.error(error.message || 'Failed to complete profile');
-      }
+      const response = await authApi.completeProfile(profileData);
+      setUser(response.data.user);
+      toast.success('Profile completed successfully!');
+      navigate('/');
     } catch (error) {
       console.error('Profile completion error:', error);
       toast.error('Failed to complete profile');

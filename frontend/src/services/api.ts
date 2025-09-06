@@ -89,12 +89,45 @@ export const authApi = {
   
   getUserPosts: (username: string) =>
     api.get(`/auth/profile/${username}/posts/`),
+  
+  getPortalPreferences: () =>
+    api.get('/auth/portal-preferences/'),
+  
+  updatePortalPreferences: (data: any) =>
+    api.post('/auth/portal-preferences/update/', data),
+  
+  getGoogleAuthUrl: () =>
+    api.get('/auth/google/auth-url/'),
+  
+  handleGoogleCallback: (data: any) =>
+    api.post('/auth/google/callback/', data),
+  
+  completeProfile: (data: any) =>
+    api.post('/auth/complete-profile/', data),
+  
+  getPurchaseOptions: () =>
+    api.get('/auth/purchase-options/'),
+  
+  purchaseTick: (tickType: string, durationMonths: number = 1) =>
+    api.post('/auth/purchase/tick/', { tick_type: tickType, duration_months: durationMonths }),
+  
+  purchasePremium: (durationMonths: number = 1) =>
+    api.post('/auth/purchase/premium/', { duration_months: durationMonths }),
+  
+  getSubscriptionTiers: () =>
+    api.get('/auth/subscription-tiers/'),
+  
+  purchaseSubscriptionTier: (data: { target_tier: number; is_yearly: boolean }) =>
+    api.post('/auth/purchase/subscription-tier/', data),
+  
+  getUserSubscriptionStatus: () =>
+    api.get('/auth/subscription-status/'),
 };
 
 // Accounts API (for organizations and other account-related features)
 export const accountsApi = {
   getCompanies: () =>
-    api.get('/accounts/companies/'),
+    api.get('/auth/companies/'),
   
   getCompany: (id: number) =>
     api.get(`/accounts/companies/${id}/`),
@@ -117,6 +150,22 @@ export const accountsApi = {
   
   verifyCompany: (id: number) =>
     api.post(`/accounts/companies/${id}/verify/`),
+  
+  // Jobs API
+  getJobs: (params?: any) =>
+    api.get('/auth/jobs/', { params }),
+  
+  getJobRecommendations: () =>
+    api.get('/auth/jobs/recommendations/'),
+  
+  applyForJob: (data: any) =>
+    api.post('/auth/jobs/apply/', data),
+  
+  getJobApplicationsToReview: (jobId: number) =>
+    api.get(`/auth/jobs/${jobId}/applications_to_review/`),
+  
+  reviewJobApplication: (jobId: number, data: any) =>
+    api.post(`/auth/jobs/${jobId}/review_application/`, data),
 };
 
 // Posts API
@@ -143,6 +192,9 @@ export const postsApi = {
   
   createComment: (postId: number, content: string, parentId?: number) =>
     api.post(`/posts/${postId}/comments/`, { content, parent: parentId }),
+  
+  trackView: (postId: number, duration?: number) =>
+    api.post(`/posts/${postId}/track_view/`, { duration }),
 };
 
 // E-commerce API
@@ -177,6 +229,45 @@ export const shopApi = {
   
   getOrders: () =>
     api.get('/ecommerce/orders/'),
+  
+  // Shop management
+  getShops: () =>
+    api.get('/ecommerce/shops/'),
+  
+  getShop: (id: number) =>
+    api.get(`/ecommerce/shops/${id}/`),
+  
+  createShop: (data: FormData) =>
+    api.post('/ecommerce/shops/', data, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  
+  updateShop: (id: number, data: FormData) =>
+    api.put(`/ecommerce/shops/${id}/`, data, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  
+  deleteShop: (id: number) =>
+    api.delete(`/ecommerce/shops/${id}/`),
+  
+  getShopStats: (id: number) =>
+    api.get(`/ecommerce/shops/${id}/stats/`),
+  
+  getShopPricingInfo: () =>
+    api.get('/ecommerce/shops/pricing_info/'),
+  
+  createProduct: (data: FormData) =>
+    api.post('/ecommerce/products/', data, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  
+  updateProduct: (id: number, data: FormData) =>
+    api.put(`/ecommerce/products/${id}/`, data, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  
+  deleteProduct: (id: number) =>
+    api.delete(`/ecommerce/products/${id}/`),
 };
 
 // Payments API

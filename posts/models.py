@@ -47,6 +47,10 @@ class Post(models.Model):
     is_flagged = models.BooleanField(default=False)
     is_approved = models.BooleanField(default=True)
     
+    # Advertisement fields
+    is_advertisement = models.BooleanField(default=False)
+    ad_expires_at = models.DateTimeField(null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     expires_at = models.DateTimeField(null=True, blank=True)

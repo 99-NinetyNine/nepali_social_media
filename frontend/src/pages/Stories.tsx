@@ -4,6 +4,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { UserIcon, PlusIcon } from '@heroicons/react/24/outline';
 import { Post } from '../types';
 import LoadingSpinner from '../components/common/LoadingSpinner';
+import { postsApi } from '../services/api';
 
 const Stories: React.FC = () => {
   const navigate = useNavigate();
@@ -19,19 +20,9 @@ const Stories: React.FC = () => {
   const fetchStories = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:8000/api/posts/?post_type=story', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        const activeStories = data.results?.filter((story: Post) => !isStoryExpired(story)) || [];
-        setStories(activeStories);
-      } else {
-        setError('Failed to fetch stories');
-      }
+      const response = await postsApi.getPosts({ post_type: 'story' });
+      const activeStories = response.data.results?.filter((story: Post) => !isStoryExpired(story)) || [];
+      setStories(activeStories);
     } catch (err) {
       console.error('Error fetching stories:', err);
       setError('Failed to fetch stories');

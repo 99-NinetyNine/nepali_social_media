@@ -104,12 +104,12 @@ class InvoiceItem(models.Model):
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='items')
     description = models.CharField(max_length=200)
     quantity = models.PositiveIntegerField(default=1)
-    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
-    total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    unit_price = models.FloatField(default=0.00)
+    total_price = models.FloatField(default=0.00)
     metadata = models.JSONField(default=dict)
 
     def save(self, *args, **kwargs):
-        self.total_price = Decimal(self.quantity) * self.unit_price
+        self.total_price =self.quantity * self.unit_price
         super().save(*args, **kwargs)
 
     def __str__(self):

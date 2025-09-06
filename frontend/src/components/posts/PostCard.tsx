@@ -87,7 +87,7 @@ const PostCard: React.FC<PostCardProps> = ({ post, onLike, onShare }) => {
     if (viewTracked) return;
     
     try {
-      await fetch(`/api/posts/${post.id}/track_view/`, {
+      await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:8000/api'}/posts/${post.id}/track_view/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

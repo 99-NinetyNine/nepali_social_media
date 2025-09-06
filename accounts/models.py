@@ -5,8 +5,29 @@ from django.utils import timezone
 
 class User(AbstractUser):
     email = models.EmailField(unique=True)
-    is_premium = models.BooleanField(default=False)
-    premium_expires_at = models.DateTimeField(null=True, blank=True)
+    # Subscription tier system
+    SUBSCRIPTION_TIERS = [
+        (0, 'Free - 10 posts/day, 4 media/post, ads shown'),
+        (1, 'Tier 1 - 20 posts/day, 8 media/post, no ads'),
+        (2, 'Tier 2 - 40 posts/day, 16 media/post, no ads'),
+        (3, 'Tier 3 - 80 posts/day, 32 media/post, no ads'),
+    ]
+    
+    subscription_tier = models.IntegerField(choices=SUBSCRIPTION_TIERS, default=0)
+    subscription_expires_at = models.DateTimeField(null=True, blank=True)
+    is_yearly_subscription = models.BooleanField(default=False)
+    
+    # Cultural tick badges (separate purchase system)
+    TICK_TYPES = [
+        ('none', 'None'),
+        ('blue', 'Blue Tick (LaliGurans Badge) 🌺'),
+        ('gold', 'Golden Tick (Sagarmatha Badge) 🏔️'),
+        ('business', 'Business Tick (Dhaka Badge) 🧵'),
+        ('special', 'Special Tick (Pashupatinath Badge) 🕉️'),
+    ]
+    
+    purchased_tick = models.CharField(max_length=10, choices=TICK_TYPES, default='none')
+    tick_expires_at = models.DateTimeField(null=True, blank=True)
     is_business = models.BooleanField(default=False)
     account_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     content_violations = models.IntegerField(default=0)
@@ -27,11 +48,56 @@ class User(AbstractUser):
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
 
+    def get_subscription_tier(self):
+        """Get current active subscription tier"""
+        if not self.subscription_expires_at or self.subscription_expires_at > timezone.now():
+            return self.subscription_tier
+        return 0  # Revert to free tier if expired
+    
     def is_premium_active(self):
-        return self.is_premium and (
-            not self.premium_expires_at or 
-            self.premium_expires_at > timezone.now()
-        )
+        """Check if user has any paid subscription tier"""
+        return self.get_subscription_tier() > 0
+    
+    def get_daily_post_limit(self):
+        """Get daily post limit based on subscription tier"""
+        tier_limits = {0: 10, 1: 20, 2: 40, 3: 80}
+        return tier_limits.get(self.get_subscription_tier(), 10)
+    
+    def get_media_per_post_limit(self):
+        """Get media files per post limit based on subscription tier"""
+        tier_limits = {0: 4, 1: 8, 2: 16, 3: 32}
+        return tier_limits.get(self.get_subscription_tier(), 4)
+    
+    def should_see_ads(self):
+        """Check if user should see advertisements"""
+        return self.get_subscription_tier() == 0
+    
+    def get_subscription_badge(self):
+        """Get subscription badge number (0 for free, 1-3 for paid tiers)"""
+        tier = self.get_subscription_tier()
+        return tier if tier > 0 else None
+    
+    def get_active_tick(self):
+        """Get currently active tick badge"""
+        if not self.tick_expires_at or self.tick_expires_at > timezone.now():
+            return self.purchased_tick
+        return 'none'
+    
+    def has_blue_tick(self):
+        return self.get_active_tick() == 'blue'
+    
+    def has_gold_tick(self):
+        return self.get_active_tick() == 'gold'
+    
+    def has_business_tick(self):
+        return self.get_active_tick() == 'business'
+    
+    def has_special_tick(self):
+        return self.get_active_tick() == 'special'
+    
+    def get_max_media_files(self):
+        """Get maximum media files allowed based on subscription tier"""
+        return self.get_media_per_post_limit()
 
     def can_post(self):
         return not self.is_suspended or (
@@ -398,3 +464,66 @@ class CreditTransaction(models.Model):
     
     def __str__(self):
         return f"{self.user.username}: {self.transaction_type} ${self.amount}"
+
+
+class TierSubscriptionPurchase(models.Model):
+    """Track subscription tier purchases"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tier_purchases')
+    from_tier = models.IntegerField(default=0)
+    to_tier = models.IntegerField()
+    is_yearly = models.BooleanField(default=False)
+    amount_paid = models.DecimalField(max_digits=10, decimal_places=2)
+    credit_applied = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)  # From previous tier
+    total_cost = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('refunded', 'Refunded'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        duration = "yearly" if self.is_yearly else "monthly"
+        return f"{self.user.username}: Tier {self.from_tier}→{self.to_tier} ({duration}) - ${self.amount_paid}"
+    
+    @staticmethod
+    def get_tier_prices():
+        """Get pricing for each tier (monthly/yearly)"""
+        # Base price x multiplier, yearly = 10x monthly
+        base_price = 5.00  # Base unit price
+        return {
+            0: {'monthly': 0.00, 'yearly': 0.00},  # Free tier
+            1: {'monthly': base_price * 2, 'yearly': base_price * 2 * 10},  # 2x
+            2: {'monthly': base_price * 3, 'yearly': base_price * 3 * 10},  # 3x  
+            3: {'monthly': base_price * 4, 'yearly': base_price * 4 * 10},  # 4x
+        }
+    
+    @staticmethod
+    def calculate_upgrade_cost(user, target_tier, is_yearly=False):
+        """Calculate cost to upgrade to target tier, accounting for remaining value"""
+        prices = TierSubscriptionPurchase.get_tier_prices()
+        current_tier = user.get_subscription_tier()
+        
+        if target_tier <= current_tier:
+            return 0.00, 0.00, 0.00  # Can't downgrade
+        
+        # Calculate new tier cost
+        duration = 'yearly' if is_yearly else 'monthly'
+        new_cost = prices[target_tier][duration]
+        
+        # Calculate remaining value from current tier
+        remaining_credit = 0.00
+        if current_tier > 0 and user.subscription_expires_at:
+            current_cost = prices[current_tier]['yearly' if user.is_yearly_subscription else 'monthly']
+            days_total = 365 if user.is_yearly_subscription else 30
+            days_remaining = max(0, (user.subscription_expires_at - timezone.now()).days)
+            remaining_credit = (current_cost * days_remaining) / days_total
+        
+        # Calculate final amount to pay
+        amount_to_pay = max(0.00, new_cost - remaining_credit)
+        
+        return new_cost, remaining_credit, amount_to_pay

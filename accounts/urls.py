@@ -10,7 +10,8 @@ from .views import (
     SubscriptionViewSet, subscribe_to_creator, add_credits,
     credit_transactions, subscription_status, update_portal_preferences,
     get_portal_preferences, google_auth_url, google_auth_callback,
-    complete_profile
+    complete_profile, purchase_tick, purchase_premium, get_purchase_options,
+    subscription_tiers, purchase_subscription_tier, user_subscription_status
 )
 
 router = DefaultRouter()
@@ -54,4 +55,14 @@ urlpatterns = [
     path('google/auth-url/', google_auth_url, name='google-auth-url'),
     path('google/callback/', google_auth_callback, name='google-auth-callback'),
     path('complete-profile/', complete_profile, name='complete-profile'),
+    
+    # Purchase system
+    path('purchase-options/', get_purchase_options, name='purchase-options'),
+    path('purchase/tick/', purchase_tick, name='purchase-tick'),
+    path('purchase/premium/', purchase_premium, name='purchase-premium'),
+    
+    # Subscription tier system
+    path('subscription-tiers/', subscription_tiers, name='subscription-tiers'),
+    path('purchase/subscription-tier/', purchase_subscription_tier, name='purchase-subscription-tier'),
+    path('subscription-status/', user_subscription_status, name='user-subscription-status'),
 ]

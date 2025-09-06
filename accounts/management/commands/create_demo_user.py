@@ -26,7 +26,7 @@ class Command(BaseCommand):
             password=demo_password,
             first_name='Demo',
             last_name='User',
-            is_premium=False,
+            subscription_tier=1,  # Give them Tier 1 subscription
             is_business=True  # Make them a business user so they can create shops/products
         )
         

@@ -13,6 +13,7 @@ const CreatePost: React.FC = () => {
     description: '',
     enable_monetization: false,
     allow_comments: true,
+    is_advertisement: false,
   });
   const [files, setFiles] = useState<FileList | null>(null);
 
@@ -48,11 +49,20 @@ const CreatePost: React.FC = () => {
       postData.append('post_type', formData.post_type);
       postData.append('description', formData.description);
       if (formData.title) postData.append('title', formData.title);
-      postData.append('enable_monetization', formData.enable_monetization.toString());
-      postData.append('allow_comments', formData.allow_comments.toString());
+      
+      // For job postings, force monetization and comments to false
+      if (formData.post_type === 'job') {
+        postData.append('enable_monetization', 'false');
+        postData.append('allow_comments', 'false');
+      } else {
+        postData.append('enable_monetization', formData.enable_monetization.toString());
+        postData.append('allow_comments', formData.allow_comments.toString());
+      }
+      
+      postData.append('is_advertisement', formData.is_advertisement.toString());
 
       if (files) {
-        Array.from(files).forEach((file, index) => {
+        Array.from(files).forEach((file) => {
           postData.append('media', file);
         });
       }
@@ -87,7 +97,6 @@ const CreatePost: React.FC = () => {
               <option value="job">Job Posting (Organizations only)</option>
               <option value="short">Short Video (max 2 min)</option>
               <option value="story">Story (max 20 sec, expires in 24h)</option>
-              <option value="ad">Advertisement</option>
             </select>
           </div>
           
@@ -133,27 +142,54 @@ const CreatePost: React.FC = () => {
             />
           </div>
           
-          <div className="flex items-center space-x-4">
-            <label className="flex items-center">
-              <input 
-                type="checkbox" 
-                name="enable_monetization"
-                checked={formData.enable_monetization}
-                onChange={handleInputChange}
-                className="mr-2" 
-              />
-              <span className="text-sm">Enable monetization</span>
-            </label>
-            <label className="flex items-center">
-              <input 
-                type="checkbox" 
-                name="allow_comments"
-                checked={formData.allow_comments}
-                onChange={handleInputChange}
-                className="mr-2" 
-              />
-              <span className="text-sm">Allow comments</span>
-            </label>
+          <div className="space-y-3">
+            {formData.post_type !== 'job' && (
+              <div className="flex items-center space-x-4">
+                <label className="flex items-center">
+                  <input 
+                    type="checkbox" 
+                    name="enable_monetization"
+                    checked={formData.enable_monetization}
+                    onChange={handleInputChange}
+                    className="mr-2" 
+                  />
+                  <span className="text-sm">Enable monetization</span>
+                </label>
+                <label className="flex items-center">
+                  <input 
+                    type="checkbox" 
+                    name="allow_comments"
+                    checked={formData.allow_comments}
+                    onChange={handleInputChange}
+                    className="mr-2" 
+                  />
+                  <span className="text-sm">Allow comments</span>
+                </label>
+              </div>
+            )}
+            
+            <div className="border-t pt-3">
+              <label className="flex items-center">
+                <input 
+                  type="checkbox" 
+                  name="is_advertisement"
+                  checked={formData.is_advertisement}
+                  onChange={handleInputChange}
+                  className="mr-2" 
+                />
+                <span className="text-sm font-medium text-blue-600">
+                  📢 Mark as Advertisement
+                </span>
+                <span className="ml-2 text-xs text-gray-500">
+                  (Will be shown to non-premium users)
+                </span>
+              </label>
+              {formData.is_advertisement && (
+                <p className="text-xs text-gray-600 mt-1 ml-6">
+                  Your {formData.post_type} will be displayed as sponsored content to non-premium users.
+                </p>
+              )}
+            </div>
           </div>
           
           <button 

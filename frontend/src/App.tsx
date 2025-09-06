@@ -51,6 +51,7 @@ function App() {
             <>
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/auth/callback" element={<GoogleCallback />} />
               <Route path="/auth/google/callback" element={<GoogleCallback />} />
               <Route path="*" element={<Navigate to="/login" replace />} />
             </>
@@ -92,6 +93,7 @@ function App() {
               
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route path="/register" element={<Navigate to="/" replace />} />
+              <Route path="/auth/callback" element={<GoogleCallback />} />
               <Route path="/auth/google/callback" element={<GoogleCallback />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>

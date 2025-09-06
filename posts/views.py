@@ -1,5 +1,5 @@
-from rest_framework import viewsets, generics, status, permissions, filters, serializers
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework import viewsets, status, permissions, filters, serializers
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, F
@@ -13,263 +13,6 @@ from .serializers import (
 from .permissions import IsAuthorOrReadOnly, IsPremiumUser
 
 
-class PostListCreateView(generics.ListCreateAPIView):
-    serializer_class = PostSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['title', 'description', 'hashtags__hashtag__name']
-    ordering_fields = ['created_at', 'view_count', 'like_count']
-    ordering = ['-created_at']
-
-    def get_serializer_class(self):
-        if self.request.method == 'POST':
-            return PostCreateSerializer
-        return PostSerializer
-
-    def get_queryset(self):
-        user = self.request.user
-        post_type = self.request.query_params.get('type')
-        
-        # Get user connections
-        connections = Connection.objects.filter(
-            Q(from_user=user, status='accepted') | 
-            Q(to_user=user, status='accepted')
-        )
-        connected_users = []
-        for conn in connections:
-            if conn.from_user == user:
-                connected_users.append(conn.to_user)
-            else:
-                connected_users.append(conn.from_user)
-        
-        # Base queryset - exclude expired stories
-        queryset = Post.objects.exclude(
-            post_type='story',
-            expires_at__lt=timezone.now()
-        ).select_related('author', 'author__profile').prefetch_related('media', 'hashtags__hashtag')
-        
-        # Filter by post type
-        if post_type:
-            queryset = queryset.filter(post_type=post_type)
-        
-        # Privacy filtering
-        queryset = queryset.filter(
-            Q(privacy='public') |
-            Q(privacy='connections', author__in=connected_users) |
-            Q(privacy='private', author=user) |
-            Q(author=user)  # User's own posts
-        ).filter(is_approved=True)
-        
-        # Add ads if user is not premium
-        if not user.is_premium_active():
-            # Get boosted posts as ads
-            ads = Post.objects.filter(
-                is_boosted=True,
-                post_type='ad',
-                boost_expires_at__gt=timezone.now()
-            ).order_by('-boost_amount')[:5]
-            
-            # Merge with regular posts
-            post_ids = list(queryset.values_list('id', flat=True)[:20])
-            ad_ids = list(ads.values_list('id', flat=True))
-            all_ids = post_ids + ad_ids
-            
-            return Post.objects.filter(id__in=all_ids).distinct()
-        
-        return queryset
-
-    def perform_create(self, serializer):
-        # Basic content moderation (dummy implementation)
-        from moderation.utils import moderate_post_content
-        
-        post_data = {
-            'content': serializer.validated_data.get('description', ''),
-            'title': serializer.validated_data.get('title', ''),
-            'user_data': {
-                'username': self.request.user.username,
-                'is_premium': getattr(self.request.user, 'is_premium', False)
-            }
-        }
-        
-        # Run moderation (always approves in dummy implementation)
-        moderation_result = moderate_post_content(post_data)
-        
-        # Save post with moderation status
-        post = serializer.save(author=self.request.user)
-        
-        # In production, you might store moderation results
-        # post.moderation_score = moderation_result.get('confidence', 0.95)
-        # post.save()
-
-
-class PostDetailView(generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = PostSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_queryset(self):
-        return Post.objects.all()
-
-    def get_object(self):
-        obj = super().get_object()
-        
-        # Record view if not the author
-        if self.request.user != obj.author:
-            PostView.objects.get_or_create(
-                user=self.request.user,
-                post=obj,
-                defaults={
-                    'ip_address': self.request.META.get('REMOTE_ADDR'),
-                    'user_agent': self.request.META.get('HTTP_USER_AGENT', '')
-                }
-            )
-            # Increment view count
-            obj.view_count = F('view_count') + 1
-            obj.save(update_fields=['view_count'])
-        
-        return obj
-
-
-@api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
-def like_post(request, post_id):
-    post = get_object_or_404(Post, id=post_id)
-    reaction_type = request.data.get('reaction_type', 'like')
-    
-    like, created = Like.objects.get_or_create(
-        user=request.user,
-        post=post,
-        defaults={'reaction_type': reaction_type}
-    )
-    
-    if not created:
-        if like.reaction_type == reaction_type:
-            # Remove reaction
-            like.delete()
-            # Update counts
-            if reaction_type == 'like':
-                post.like_count = F('like_count') - 1
-            else:
-                post.dislike_count = F('dislike_count') - 1
-            post.save()
-            return Response({'removed': True})
-        else:
-            # Change reaction
-            old_reaction = like.reaction_type
-            like.reaction_type = reaction_type
-            like.save()
-            
-            # Update counts
-            if old_reaction == 'like':
-                post.like_count = F('like_count') - 1
-            else:
-                post.dislike_count = F('dislike_count') - 1
-                
-            if reaction_type == 'like':
-                post.like_count = F('like_count') + 1
-            else:
-                post.dislike_count = F('dislike_count') + 1
-            
-            post.save()
-    else:
-        # New reaction
-        if reaction_type == 'like':
-            post.like_count = F('like_count') + 1
-        else:
-            post.dislike_count = F('dislike_count') + 1
-        post.save()
-    
-    return Response(LikeSerializer(like).data)
-
-
-@api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
-def share_post(request, post_id):
-    post = get_object_or_404(Post, id=post_id)
-    message = request.data.get('message', '')
-    
-    if not post.allow_sharing:
-        return Response({
-            'error': 'Sharing is not allowed for this post'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    share, created = Share.objects.get_or_create(
-        user=request.user,
-        post=post,
-        defaults={'message': message}
-    )
-    
-    if created:
-        post.share_count = F('share_count') + 1
-        post.save()
-    
-    return Response(ShareSerializer(share).data)
-
-
-class CommentListCreateView(generics.ListCreateAPIView):
-    serializer_class = CommentSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_queryset(self):
-        post_id = self.kwargs['post_id']
-        return Comment.objects.filter(
-            post_id=post_id, 
-            parent=None
-        ).select_related('author', 'author__profile')
-
-    def perform_create(self, serializer):
-        post_id = self.kwargs['post_id']
-        post = get_object_or_404(Post, id=post_id)
-        
-        if not post.allow_comments:
-            raise serializers.ValidationError("Comments are not allowed for this post")
-        
-        comment = serializer.save(author=self.request.user, post=post)
-        post.comment_count = F('comment_count') + 1
-        post.save()
-
-
-class TrendingHashtagsView(generics.ListAPIView):
-    serializer_class = HashtagSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def get_queryset(self):
-        return Hashtag.objects.order_by('-trending_score', '-post_count')[:20]
-
-
-class BoostPostView(generics.GenericAPIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request, post_id):
-        post = get_object_or_404(Post, id=post_id, author=request.user)
-        boost_amount = float(request.data.get('amount', 0))
-        
-        if boost_amount <= 0:
-            return Response({
-                'error': 'Boost amount must be greater than 0'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if request.user.account_balance < boost_amount:
-            return Response({
-                'error': 'Insufficient account balance'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Deduct from user account
-        request.user.account_balance = F('account_balance') - boost_amount
-        request.user.save()
-        
-        # Boost the post
-        post.is_boosted = True
-        post.boost_amount = F('boost_amount') + boost_amount
-        post.boost_expires_at = timezone.now() + timezone.timedelta(days=7)
-        post.save()
-        
-        return Response({
-            'success': True,
-            'message': f'Post boosted with ${boost_amount}'
-        })
-
-
-# Modern ViewSet-based implementation
 class PostViewSet(viewsets.ModelViewSet):
     serializer_class = PostSerializer
     permission_classes = [permissions.IsAuthenticated, IsAuthorOrReadOnly]
@@ -299,22 +42,51 @@ class PostViewSet(viewsets.ModelViewSet):
             else:
                 connected_users.append(conn.from_user)
         
-        # Base queryset - exclude expired stories
-        queryset = Post.objects.exclude(
-            post_type='story',
-            expires_at__lt=timezone.now()
-        ).select_related('author', 'author__profile').prefetch_related('media', 'hashtags__hashtag')
+        # Base queryset
+        queryset = Post.objects.select_related('author', 'author__profile').prefetch_related('media', 'hashtags__hashtag')
         
         # Filter by post type
         if post_type:
             queryset = queryset.filter(post_type=post_type)
+            # Only exclude expired stories if we're filtering for stories
+            if post_type == 'story':
+                queryset = queryset.exclude(expires_at__lt=timezone.now())
+        else:
+            # For default posts feed, exclude shorts and stories
+            queryset = queryset.exclude(post_type__in=['short', 'story'])
         
-        # Filter by privacy and connections
+        # Privacy filtering with ad injection for non-premium users
         queryset = queryset.filter(
             Q(privacy='public') |
-            Q(author=user) |
-            Q(privacy='connections', author__in=connected_users)
-        )
+            Q(privacy='connections', author__in=connected_users) |
+            Q(privacy='private', author=user) |
+            Q(author=user)  # User's own posts
+        ).filter(is_approved=True)
+        
+        # Add ads if user is not premium (and not filtering for specific type)
+        if not user.is_premium_active() and not post_type:
+            # Get boosted posts as ads (any type can be boosted)
+            ads = Post.objects.filter(
+                is_boosted=True,
+                is_approved=True
+            ).filter(
+                Q(boost_expires_at__isnull=True) | Q(boost_expires_at__gt=timezone.now())
+            ).filter(
+                Q(privacy='public') |
+                Q(privacy='connections', author__in=connected_users)
+            ).order_by('-boost_amount')[:3]  # Top paid ads
+            
+            # Get regular posts (non-boosted)
+            regular_posts = queryset.filter(
+                Q(is_boosted=False) | Q(is_boosted__isnull=True)
+            )[:15]
+            
+            # Combine and return as queryset
+            ad_ids = list(ads.values_list('id', flat=True))
+            regular_ids = list(regular_posts.values_list('id', flat=True))
+            combined_ids = regular_ids + ad_ids
+            
+            return Post.objects.filter(id__in=combined_ids).distinct()
         
         return queryset
 
@@ -439,6 +211,9 @@ class PostViewSet(viewsets.ModelViewSet):
         if not content:
             return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
         
+        if not post.allow_comments:
+            return Response({'error': 'Comments are not allowed for this post'}, status=status.HTTP_400_BAD_REQUEST)
+        
         parent = None
         if parent_id:
             try:
@@ -447,7 +222,7 @@ class PostViewSet(viewsets.ModelViewSet):
                 return Response({'error': 'Parent comment not found'}, status=status.HTTP_400_BAD_REQUEST)
         
         comment = Comment.objects.create(
-            user=request.user,
+            author=request.user,
             post=post,
             content=content,
             parent=parent
@@ -459,18 +234,40 @@ class PostViewSet(viewsets.ModelViewSet):
         serializer = CommentSerializer(comment)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, IsPremiumUser])
+    @action(detail=True, methods=['post'])
     def boost(self, request, pk=None):
-        """Boost a post (premium feature)"""
+        """Boost a post with payment"""
         post = self.get_object()
         
         if post.author != request.user:
             return Response({'error': 'You can only boost your own posts'}, status=status.HTTP_403_FORBIDDEN)
         
+        boost_amount = float(request.data.get('amount', 0))
+        
+        if boost_amount <= 0:
+            return Response({
+                'error': 'Boost amount must be greater than 0'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if request.user.account_balance < boost_amount:
+            return Response({
+                'error': 'Insufficient account balance'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Deduct from user account
+        request.user.account_balance = F('account_balance') - boost_amount
+        request.user.save()
+        
+        # Boost the post
         post.is_boosted = True
+        post.boost_amount = F('boost_amount') + boost_amount
+        post.boost_expires_at = timezone.now() + timezone.timedelta(days=7)
         post.save()
         
-        return Response({'message': 'Post boosted successfully'})
+        return Response({
+            'success': True,
+            'message': f'Post boosted with ${boost_amount}'
+        })
 
     @action(detail=False, methods=['get'])
     def my_posts(self, request):
@@ -525,3 +322,93 @@ class PostViewSet(viewsets.ModelViewSet):
                 return Response({'message': 'View tracked'})
         
         return Response({'message': 'View not tracked'})
+
+
+class CommentViewSet(viewsets.ModelViewSet):
+    serializer_class = CommentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        post_id = self.kwargs.get('post_pk')
+        if post_id:
+            return Comment.objects.filter(
+                post_id=post_id, 
+                parent=None
+            ).select_related('author', 'author__profile').order_by('-created_at')
+        return Comment.objects.none()
+
+    def perform_create(self, serializer):
+        post_id = self.kwargs['post_pk']
+        post = get_object_or_404(Post, id=post_id)
+        
+        if not post.allow_comments:
+            raise serializers.ValidationError("Comments are not allowed for this post")
+        
+        parent_id = self.request.data.get('parent')
+        parent = None
+        if parent_id:
+            try:
+                parent = Comment.objects.get(id=parent_id, post=post)
+            except Comment.DoesNotExist:
+                raise serializers.ValidationError("Parent comment not found")
+        
+        comment = serializer.save(author=self.request.user, post=post, parent=parent)
+        post.comment_count = F('comment_count') + 1
+        post.save()
+
+    @action(detail=True, methods=['post'])
+    def like(self, request, pk=None, post_pk=None):
+        """Like or unlike a comment"""
+        comment = self.get_object()
+        
+        like, created = Like.objects.get_or_create(
+            user=request.user,
+            comment=comment,
+            defaults={'reaction_type': 'like'}
+        )
+        
+        if not created:
+            like.delete()
+            return Response({'message': 'Like removed', 'liked': False})
+        
+        return Response({'message': 'Comment liked', 'liked': True})
+
+    @action(detail=True, methods=['get'])
+    def replies(self, request, pk=None, post_pk=None):
+        """Get replies to a comment"""
+        comment = self.get_object()
+        replies = Comment.objects.filter(parent=comment).order_by('created_at')
+        serializer = CommentSerializer(replies, many=True)
+        return Response(serializer.data)
+
+
+class HashtagViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = HashtagSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = Hashtag.objects.all()
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name']
+    ordering_fields = ['trending_score', 'post_count', 'created_at']
+    ordering = ['-trending_score']
+
+    @action(detail=False, methods=['get'])
+    def trending(self, request):
+        """Get trending hashtags"""
+        trending_hashtags = Hashtag.objects.order_by('-trending_score', '-post_count')[:20]
+        serializer = self.get_serializer(trending_hashtags, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def posts(self, request, pk=None):
+        """Get posts for a specific hashtag"""
+        hashtag = self.get_object()
+        posts = Post.objects.filter(
+            hashtags__hashtag=hashtag,
+            privacy='public',
+            is_approved=True
+        ).order_by('-created_at')
+        
+        # Use PostViewSet serializer for consistency
+        from .serializers import PostSerializer
+        serializer = PostSerializer(posts, many=True, context={'request': request})
+        return Response(serializer.data)

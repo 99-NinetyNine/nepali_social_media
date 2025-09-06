@@ -1,434 +1,360 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { 
-  UserPlusIcon, 
-  UserMinusIcon,
-  ClockIcon,
-  CheckIcon,
-  XMarkIcon,
-  CogIcon,
-  MapPinIcon,
-  LinkIcon,
-  CalendarIcon,
-  BuildingOfficeIcon,
-  ShieldCheckIcon
-} from '@heroicons/react/24/outline';
-import { 
-  UserPlusIcon as UserPlusIconSolid,
-  CheckIcon as CheckIconSolid 
-} from '@heroicons/react/24/solid';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../store/authStore';
+import { authApi, postsApi } from '../services/api';
 import LoadingSpinner from '../components/common/LoadingSpinner';
-import PostCard from '../components/posts/PostCard';
-
-interface UserProfile {
-  id: number;
-  user: {
-    id: number;
-    username: string;
-    first_name: string;
-    last_name: string;
-    email: string;
-    is_business: boolean;
-    date_joined: string;
-  };
-  bio: string;
-  avatar: string | null;
-  cover_photo: string | null;
-  location: string;
-  website: string;
-  phone_number: string;
-  is_verified: boolean;
-  privacy_level: string;
-  requires_follow_approval: boolean;
-  followers_count: number;
-  following_count: number;
-  posts_count: number;
-  follow_status: string | null;
-  is_following: boolean;
-}
-
-interface Post {
-  id: number;
-  author: any;
-  title: string;
-  description: string;
-  post_type: 'post' | 'job' | 'short' | 'story' | 'ad';
-  privacy: 'public' | 'connections' | 'private';
-  is_monetized: boolean;
-  allow_comments: boolean;
-  allow_sharing: boolean;
-  created_at: string;
-  updated_at: string;
-  like_count: number;
-  dislike_count: number;
-  comment_count: number;
-  share_count: number;
-  view_count: number;
-  media: any[];
-  hashtags: any[];
-  user_reaction: string | null;
-  is_shared_by_user: boolean;
-  is_boosted: boolean;
-  has_access: boolean;
-  is_subscription_required: boolean;
-}
 
 const Profile: React.FC = () => {
   const { username } = useParams<{ username: string }>();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [activeTab, setActiveTab] = useState<'posts' | 'stories' | 'reels' | 'jobs'>('posts');
+  const navigate = useNavigate();
+  const { user: currentUser } = useAuthStore();
+  const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [postsLoading, setPostsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [followLoading, setFollowLoading] = useState(false);
+  const [posts, setPosts] = useState<any[]>([]);
+  const [postsLoading, setPostsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('posts');
 
   useEffect(() => {
-    if (username) {
-      fetchProfile();
-      fetchUserPosts();
-    }
-  }, [username]);
-
-  const fetchProfile = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch(`/api/auth/profile/${username}/`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Cache-Control': 'no-cache'
+    const loadProfile = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        if (!username) {
+          // No username provided, load current user's profile
+          if (!currentUser) {
+            setError('Please login to view your profile');
+            return;
+          }
+          
+          const response = await authApi.getProfile();
+          console.log("response.data", response.data);
+          setProfile({
+            ...response.data,
+            user: response.data.user,
+            isOwnProfile: true
+          });
+        } else {
+          // Username provided, load that user's profile
+          const response = await authApi.getPublicProfile(username);
+          setProfile({
+            ...response.data,
+            isOwnProfile: username === currentUser?.username
+          });
         }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setProfile(data);
-      } else {
-        setError('Profile not found');
+      } catch (error: any) {
+        console.error('Error loading profile:', error);
+        setError('Failed to load profile');
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-      setError('Failed to load profile');
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
-  const fetchUserPosts = async () => {
+    loadProfile();
+  }, [username, currentUser]);
+
+  useEffect(() => {
+    if (profile && activeTab === 'posts') {
+      loadUserPosts();
+    }
+  }, [profile, activeTab]);
+
+  const loadUserPosts = async () => {
     try {
       setPostsLoading(true);
-      const response = await fetch(`/api/auth/profile/${username}/posts/`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setPosts(data.results || data);
-      }
+      const targetUsername = username || currentUser?.username;
+      if (!targetUsername) return;
+
+      const response = await authApi.getUserPosts(targetUsername);
+      // Filter only regular posts (not shorts, stories, jobs, ads)
+      const regularPosts = response.data.results?.filter((post: any) => 
+        post.post_type === 'post' && !post.is_advertisement
+      ) || [];
+      setPosts(regularPosts);
     } catch (error) {
-      console.error('Error fetching posts:', error);
+      console.error('Error loading user posts:', error);
     } finally {
       setPostsLoading(false);
     }
   };
 
-  const handleFollow = async () => {
-    if (!profile) return;
-    
-    setFollowLoading(true);
-    try {
-      const response = await fetch(`/api/auth/follow/${username}/`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        
-        // Update profile follow status based on response
-        setProfile(prev => prev ? {
-          ...prev,
-          follow_status: data.action === 'followed' ? 'accepted' : 
-                       data.action === 'request_sent' ? 'pending' : null,
-          is_following: data.action === 'followed',
-          followers_count: data.action === 'followed' ? prev.followers_count + 1 :
-                          data.action === 'unfollowed' ? prev.followers_count - 1 : prev.followers_count
-        } : null);
-      }
-    } catch (error) {
-      console.error('Error following user:', error);
-    } finally {
-      setFollowLoading(false);
-    }
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'long',
-      year: 'numeric'
-    });
-  };
-
-  const getFollowButtonContent = () => {
-    if (!profile) return { text: 'Follow', icon: UserPlusIcon, className: 'btn-primary' };
-    
-    if (profile.is_following) {
-      return { 
-        text: 'Following', 
-        icon: CheckIconSolid, 
-        className: 'btn-success hover:btn-danger hover:text-white group' 
-      };
-    } else if (profile.follow_status === 'pending') {
-      return { 
-        text: 'Requested', 
-        icon: ClockIcon, 
-        className: 'btn-secondary' 
-      };
+  const handleTabNavigation = (tab: string) => {
+    if (tab === 'posts') {
+      setActiveTab('posts');
     } else {
-      return { 
-        text: 'Follow', 
-        icon: UserPlusIcon, 
-        className: 'btn-primary' 
-      };
+      // Navigate to specialized views with user filter
+      const targetUsername = username || currentUser?.username;
+      const params = new URLSearchParams();
+      if (targetUsername) {
+        params.set('user', targetUsername);
+        params.set('view', 'mine');
+      }
+      
+      switch (tab) {
+        case 'stories':
+          navigate(`/stories?${params.toString()}`);
+          break;
+        case 'shorts':
+          navigate(`/shorts?${params.toString()}`);
+          break;
+        case 'jobs':
+          navigate(`/jobs?${params.toString()}`);
+          break;
+        case 'ads':
+          navigate(`/?${params.toString()}&type=ads`);
+          break;
+      }
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <LoadingSpinner />
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
       </div>
     );
   }
 
-  if (error || !profile) {
+  if (error) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Profile not found</h1>
-          <p className="text-gray-600 mb-4">{error || 'The user you are looking for does not exist.'}</p>
-          <Link to="/" className="btn btn-primary">
-            Back to Home
-          </Link>
+          <p className="text-red-600 mb-4">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+          >
+            Try Again
+          </button>
         </div>
       </div>
     );
   }
 
-  const followBtn = getFollowButtonContent();
-  const isOwnProfile = false; // You'd check this against current user
-
-  // Filter posts by type based on active tab
-  const filteredPosts = posts.filter(post => {
-    switch (activeTab) {
-      case 'posts':
-        return post.post_type === 'post';
-      case 'stories':
-        return post.post_type === 'story';
-      case 'reels':
-        return post.post_type === 'short';
-      case 'jobs':
-        return post.post_type === 'job';
-      default:
-        return true;
-    }
-  });
+  if (!profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-600">Profile not found</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* Cover Photo */}
-      <div className="relative h-48 md:h-64 rounded-lg overflow-hidden mb-6">
-        {profile.cover_photo ? (
-          <img
-            src={profile.cover_photo}
-            alt="Cover"
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-r from-blue-400 to-purple-500"></div>
-        )}
-        
-        {/* Profile Picture */}
-        <div className="absolute -bottom-6 left-6">
-          <div className="relative">
+    <div className="max-w-4xl mx-auto p-6">
+      <div className="bg-white rounded-lg shadow-md p-6">
+        {/* Profile Header */}
+        <div className="flex items-center space-x-4 mb-6">
+          <div className="w-20 h-20 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 flex items-center justify-center">
             {profile.avatar ? (
-              <img
-                src={profile.avatar}
-                alt={profile.user.username}
-                className="w-24 h-24 rounded-full border-4 border-white object-cover"
+              <img 
+                src={profile.avatar} 
+                alt={profile.user?.username || 'User avatar'}
+                className="w-full h-full rounded-full object-cover"
               />
             ) : (
-              <div className="w-24 h-24 rounded-full border-4 border-white bg-gray-200 flex items-center justify-center">
-                <span className="text-gray-500 text-2xl font-bold">
-                  {profile.user.first_name?.[0] || profile.user.username[0]}
-                </span>
-              </div>
-            )}
-            
-            {profile.is_verified && (
-              <div className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full p-1">
-                <ShieldCheckIcon className="h-4 w-4 text-white" />
-              </div>
+              <span className="text-2xl font-bold text-white">
+                {(profile.user?.first_name?.[0] || profile.user?.username?.[0] || '?').toUpperCase()}
+              </span>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Profile Info */}
-      <div className="pt-6">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-6">
-          <div className="mb-4 md:mb-0">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              {profile.user.first_name && profile.user.last_name 
+          
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold text-gray-900">
+              {profile.user?.first_name && profile.user?.last_name
                 ? `${profile.user.first_name} ${profile.user.last_name}`
-                : profile.user.username
+                : profile.user?.username || 'Unknown User'
               }
-              {profile.user.is_business && (
-                <BuildingOfficeIcon className="inline h-6 w-6 ml-2 text-blue-600" />
+              
+              {/* Premium ticks */}
+              {profile.user?.has_blue_tick && (
+                <span className="ml-2 text-blue-500" title="Blue Tick (LaliGurans Badge) 🌺">
+                  ✓
+                </span>
+              )}
+              {profile.user?.has_gold_tick && (
+                <span className="ml-2 text-yellow-500" title="Golden Tick (Sagarmatha Badge) 🏔️">
+                  ✓
+                </span>
+              )}
+              {profile.user?.has_business_tick && (
+                <span className="ml-2 text-green-500" title="Business Tick (Dhaka Badge) 🧵">
+                  ✓
+                </span>
+              )}
+              {profile.user?.has_special_tick && (
+                <span className="ml-2 text-purple-500" title="Special Tick (Pashupatinath Badge) 🕉️">
+                  ✓
+                </span>
+              )}
+              
+              {/* Show subscription badge */}
+              {profile.user?.subscription_badge && (
+                <span className="ml-2 px-2 py-1 text-xs bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-full">
+                  {profile.user.subscription_badge === 1 && '🌺 TIER 1'}
+                  {profile.user.subscription_badge === 2 && '🦚 TIER 2'}
+                  {profile.user.subscription_badge === 3 && '🏔️ TIER 3'}
+                </span>
               )}
             </h1>
             
-            <p className="text-gray-600 mb-2">@{profile.user.username}</p>
+            <p className="text-gray-600 mb-2">@{profile.user?.username || 'unknown'}</p>
             
             {profile.bio && (
-              <p className="text-gray-700 mb-4 max-w-md">{profile.bio}</p>
+              <p className="text-gray-700">{profile.bio}</p>
             )}
             
-            <div className="flex flex-wrap gap-4 text-sm text-gray-600">
-              {profile.location && (
-                <div className="flex items-center">
-                  <MapPinIcon className="h-4 w-4 mr-1" />
-                  {profile.location}
-                </div>
-              )}
-              
-              {profile.website && (
-                <a 
-                  href={profile.website} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="flex items-center text-blue-600 hover:underline"
-                >
-                  <LinkIcon className="h-4 w-4 mr-1" />
-                  Website
-                </a>
-              )}
-              
-              <div className="flex items-center">
-                <CalendarIcon className="h-4 w-4 mr-1" />
-                Joined {formatDate(profile.user.date_joined)}
-              </div>
-            </div>
-          </div>
-          
-          {/* Action Buttons */}
-          <div className="flex space-x-3">
-            {isOwnProfile ? (
-              <Link to="/settings" className="btn btn-secondary">
-                <CogIcon className="h-4 w-4 mr-2" />
-                Edit Profile
-              </Link>
-            ) : (
-              <button
-                onClick={handleFollow}
-                disabled={followLoading}
-                className={`btn ${followBtn.className} group`}
-              >
-                {followLoading ? (
-                  <LoadingSpinner size="sm" />
-                ) : (
-                  <followBtn.icon className="h-4 w-4 mr-2 group-hover:hidden" />
-                )}
-                <span className="group-hover:hidden">{followBtn.text}</span>
-                <span className="hidden group-hover:inline">
-                  {profile.is_following ? 'Unfollow' : followBtn.text}
-                </span>
-              </button>
+            {profile.location && (
+              <p className="text-gray-500 text-sm mt-1">📍 {profile.location}</p>
             )}
           </div>
+          
+          {profile.isOwnProfile && (
+            <button className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50">
+              Edit Profile
+            </button>
+          )}
         </div>
 
         {/* Stats */}
-        <div className="flex space-x-8 mb-8 text-center">
-          <div>
-            <div className="text-xl font-bold text-gray-900">{profile.posts_count}</div>
-            <div className="text-sm text-gray-600">Posts</div>
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="text-center">
+            <div className="text-xl font-bold text-gray-900">
+              {profile.posts_count || 0}
+            </div>
+            <div className="text-gray-600">Posts</div>
           </div>
-          
-          <Link to={`/profile/${username}/followers`} className="hover:bg-gray-50 p-2 rounded">
-            <div className="text-xl font-bold text-gray-900">{profile.followers_count}</div>
-            <div className="text-sm text-gray-600">Followers</div>
-          </Link>
-          
-          <Link to={`/profile/${username}/following`} className="hover:bg-gray-50 p-2 rounded">
-            <div className="text-xl font-bold text-gray-900">{profile.following_count}</div>
-            <div className="text-sm text-gray-600">Following</div>
-          </Link>
+          <div className="text-center">
+            <div className="text-xl font-bold text-gray-900">
+              {profile.followers_count || 0}
+            </div>
+            <div className="text-gray-600">Followers</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xl font-bold text-gray-900">
+              {profile.following_count || 0}
+            </div>
+            <div className="text-gray-600">Following</div>
+          </div>
         </div>
 
-        {/* Tabs */}
-        <div className="border-b border-gray-200 mb-6">
-          <nav className="-mb-px flex space-x-8">
-            {['posts', 'stories', 'reels', ...(profile.user.is_business ? ['jobs'] : [])].map((tab) => (
+        {/* Content Tabs */}
+        <div className="border-t pt-6">
+          <div className="flex space-x-1 mb-6">
+            <button
+              onClick={() => handleTabNavigation('posts')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === 'posts' 
+                  ? 'bg-blue-100 text-blue-700 border border-blue-200' 
+                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+              }`}
+            >
+              📝 Posts
+            </button>
+            <button
+              onClick={() => handleTabNavigation('stories')}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+            >
+              📖 Stories
+            </button>
+            <button
+              onClick={() => handleTabNavigation('shorts')}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+            >
+              🎬 Shorts
+            </button>
+            {profile.user?.is_business && (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab as any)}
-                className={`py-2 px-1 border-b-2 font-medium text-sm capitalize ${
-                  activeTab === tab
-                    ? 'border-primary-500 text-primary-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
+                onClick={() => handleTabNavigation('jobs')}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-colors"
               >
-                {tab}
-                {tab === 'posts' && posts.filter(p => p.post_type === 'post').length > 0 && (
-                  <span className="ml-2 bg-gray-100 text-gray-900 py-0.5 px-2 rounded-full text-xs">
-                    {posts.filter(p => p.post_type === 'post').length}
-                  </span>
-                )}
+                💼 Jobs
               </button>
-            ))}
-          </nav>
-        </div>
+            )}
+            <button
+              onClick={() => handleTabNavigation('ads')}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+            >
+              📢 Ads
+            </button>
+          </div>
 
-        {/* Content */}
-        <div className="space-y-6">
-          {postsLoading ? (
-            <div className="flex justify-center py-8">
-              <LoadingSpinner />
-            </div>
-          ) : filteredPosts.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <p className="text-lg mb-2">
-                No {activeTab} yet
-              </p>
-              <p className="text-sm">
-                {isOwnProfile 
-                  ? `Share your first ${activeTab.slice(0, -1)}!` 
-                  : `${profile.user.first_name || profile.user.username} hasn't shared any ${activeTab} yet.`
-                }
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-6">
-              {filteredPosts.map((post) => (
-                <PostCard
-                  key={post.id}
-                  post={post}
-                  onLike={(postId) => {
-                    // Handle like
-                    console.log('Like post:', postId);
-                  }}
-                  onShare={(postId) => {
-                    // Handle share
-                    console.log('Share post:', postId);
-                  }}
-                />
-              ))}
+          {/* Posts Content */}
+          {activeTab === 'posts' && (
+            <div>
+              {postsLoading ? (
+                <div className="flex justify-center py-8">
+                  <LoadingSpinner />
+                </div>
+              ) : posts.length > 0 ? (
+                <div className="space-y-4">
+                  {posts.map((post) => (
+                    <div key={post.id} className="bg-white border rounded-lg p-4 hover:shadow-md transition-shadow">
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-gray-900 mb-2">
+                            {post.title || 'Untitled Post'}
+                          </h3>
+                          <p className="text-gray-700 mb-3">
+                            {post.description?.length > 150 
+                              ? `${post.description.substring(0, 150)}...` 
+                              : post.description
+                            }
+                          </p>
+                          
+                          {/* Post Media */}
+                          {post.media && post.media.length > 0 && (
+                            <div className="grid grid-cols-2 gap-2 mb-3">
+                              {post.media.slice(0, 4).map((media: any, index: number) => (
+                                <div key={index} className="relative aspect-square rounded-lg overflow-hidden">
+                                  {media.media_type === 'image' ? (
+                                    <img 
+                                      src={media.file} 
+                                      alt={media.alt_text}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <video 
+                                      src={media.file}
+                                      poster={media.thumbnail}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  )}
+                                  {post.media.length > 4 && index === 3 && (
+                                    <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                                      <span className="text-white font-semibold">
+                                        +{post.media.length - 4} more
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          <div className="flex items-center justify-between text-sm text-gray-500">
+                            <div className="flex items-center space-x-4">
+                              <span>👍 {post.like_count}</span>
+                              <span>💬 {post.comment_count}</span>
+                              <span>👁️ {post.view_count}</span>
+                            </div>
+                            <span>
+                              {new Date(post.created_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-center py-8">
+                  {profile.isOwnProfile 
+                    ? "You haven't shared any posts yet." 
+                    : `${profile.user?.first_name || profile.user?.username || 'This user'} hasn't shared any posts yet.`
+                  }
+                </p>
+              )}
             </div>
           )}
         </div>

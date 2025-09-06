@@ -13,6 +13,7 @@ import { formatDistanceToNow } from 'date-fns';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import TinderReview from '../components/jobs/TinderReview';
 import { useAuthStore } from '../store/authStore';
+import { accountsApi } from '../services/api';
 
 interface Company {
   id: number;
@@ -94,18 +95,9 @@ const Jobs: React.FC = () => {
       if (filters.location) params.append('location', filters.location);
       if (filters.is_remote !== null) params.append('is_remote', filters.is_remote.toString());
 
-      const response = await fetch(`/api/auth/jobs/?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setJobs(data.results || data);
-      } else {
-        setError('Failed to fetch jobs');
-      }
+      const response = await  accountsApi.getJobs(params);
+      setJobs(response.results || response.data);
+     
     } catch (err) {
       console.error('Error fetching jobs:', err);
       setError('Failed to fetch jobs');
@@ -116,16 +108,9 @@ const Jobs: React.FC = () => {
 
   const fetchRecommendations = async () => {
     try {
-      const response = await fetch('/api/auth/jobs/recommendations/', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await accountsApi.getJobRecommendations();
       
-      if (response.ok) {
-        const data = await response.json();
-        setRecommendations(data);
-      }
+      setRecommendations(response.data || []);
     } catch (err) {
       console.error('Error fetching recommendations:', err);
     }
@@ -133,16 +118,9 @@ const Jobs: React.FC = () => {
 
   const fetchUserCompanies = async () => {
     try {
-      const response = await fetch('/api/auth/companies/', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await accountsApi.getCompanies();
       
-      if (response.ok) {
-        const data = await response.json();
-        setCompanies(data);
-      }
+        setCompanies(response.result);
     } catch (err) {
       console.error('Error fetching companies:', err);
     }
@@ -763,7 +741,7 @@ const PostJobModal: React.FC<{
                   required
                 >
                   <option value="">Select Company</option>
-                  {companies.map(company => (
+                  {companies?.map(company => (
                     <option key={company.id} value={company.id}>
                       {company.name}
                     </option>

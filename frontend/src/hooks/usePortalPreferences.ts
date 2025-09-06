@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { authApi } from '../services/api';
 
 interface PortalPreferences {
   enable_job_portal: boolean;
@@ -16,16 +17,8 @@ export const usePortalPreferences = () => {
 
   const fetchPreferences = async () => {
     try {
-      const response = await fetch('/api/auth/portal-preferences/', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setPreferences(data);
-      }
+      const response = await authApi.getPortalPreferences();
+      setPreferences(response.data);
     } catch (error) {
       console.error('Error fetching portal preferences:', error);
     } finally {
@@ -35,23 +28,12 @@ export const usePortalPreferences = () => {
 
   const updatePreferences = async (updates: Partial<PortalPreferences>) => {
     try {
-      const response = await fetch('/api/auth/portal-preferences/update/', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(updates)
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setPreferences(prev => ({
-          ...prev,
-          enable_job_portal: data.enable_job_portal,
-          enable_shop_portal: data.enable_shop_portal
-        }));
-      }
+      const response = await authApi.updatePortalPreferences(updates);
+      setPreferences(prev => ({
+        ...prev,
+        enable_job_portal: response.data.enable_job_portal,
+        enable_shop_portal: response.data.enable_shop_portal
+      }));
     } catch (error) {
       console.error('Error updating portal preferences:', error);
     }
